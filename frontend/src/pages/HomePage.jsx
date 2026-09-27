@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import ConfirmModal from '../components/ConfirmModal';
 import ViewModal from '../components/ViewModal';
+import PromptCard from '../components/PromptCard';
+import HistoryModal from '../components/HistoryModal';
 
 const HomePage = () => {
   const [prompts, setPrompts] = useState([]);
@@ -17,6 +19,10 @@ const HomePage = () => {
   
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [technicalPromptContent, setTechnicalPromptContent] = useState('');
+  
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
+  const [isEnhancing, setIsEnhancing] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -37,8 +43,6 @@ const HomePage = () => {
       setLoading(false);
     }
   };
-
-  const [isEnhancing, setIsEnhancing] = useState(false);
 
   const handleEnhance = async () => {
     if (!content.trim()) {
@@ -142,6 +146,12 @@ const HomePage = () => {
     }
   };
 
+  const handleDuplicate = (prompt) => {
+    setName(`${prompt.name} (עותק)`);
+    setContent(prompt.content);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   if (loading) return <div className="p-8 text-center text-gray-500">טוען...</div>;
 
   return (
@@ -150,12 +160,12 @@ const HomePage = () => {
         <h1 className="text-2xl md:text-3xl font-bold text-blue-900">GoldenCare Backoffice - ניהול פרומפטים</h1>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 lg:h-[680px]">
         {/* Create Form */}
-        <div className="bg-white p-5 md:p-6 rounded-lg shadow border border-gray-100 h-fit">
-          <h2 className="text-lg md:text-xl font-semibold mb-4 border-b pb-2 text-gray-800">יצירת גרסה חדשה</h2>
-          <form onSubmit={createPrompt} className="space-y-4">
-            <div>
+        <div className="bg-white p-5 md:p-6 rounded-lg shadow border border-gray-100 flex flex-col h-full">
+          <h2 className="text-lg md:text-xl font-semibold mb-4 border-b pb-2 text-gray-800 shrink-0">יצירת גרסה חדשה</h2>
+          <form onSubmit={createPrompt} className="flex flex-col flex-1 space-y-4">
+            <div className="shrink-0">
               <label className="block text-sm font-medium mb-1 text-gray-700">שם הגרסה</label>
               <input 
                 type="text" 
@@ -166,8 +176,8 @@ const HomePage = () => {
                 placeholder="למשל: פרומפט חשבוניות מעודכן"
               />
             </div>
-            <div>
-              <div className="flex justify-between items-end mb-1">
+            <div className="flex flex-col flex-1">
+              <div className="flex justify-between items-end mb-1 shrink-0">
                 <label className="block text-sm font-medium text-gray-700">תוכן הפרומפט</label>
                 <button 
                   type="button" 
@@ -182,13 +192,12 @@ const HomePage = () => {
                 value={content}
                 onChange={e => setContent(e.target.value)}
                 required
-                rows={6}
-                className="w-full border border-gray-300 rounded p-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition resize-y"
+                className="w-full border border-gray-300 rounded p-2 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition flex-1 resize-none min-h-[150px]"
                 placeholder="הכנס את ההנחיות למודל ה-AI כאן..."
                 dir="auto"
               />
             </div>
-            <div>
+            <div className="shrink-0">
               <label className="block text-sm font-medium mb-1 text-gray-700">הערות שחרור (אופציונלי)</label>
               <input 
                 type="text" 
@@ -198,49 +207,40 @@ const HomePage = () => {
                 placeholder="מה השתנה בגרסה זו?"
               />
             </div>
-            <button type="submit" className="w-full bg-blue-600 text-white font-medium py-2 px-4 rounded hover:bg-blue-700 transition shadow-sm">
+            <button type="submit" className="w-full bg-blue-600 text-white font-medium py-2 px-4 rounded hover:bg-blue-700 transition shadow-sm shrink-0">
               שמור פרומפט
             </button>
           </form>
         </div>
 
         {/* Prompt History */}
-        <div className="space-y-4">
-          <h2 className="text-lg md:text-xl font-semibold mb-4 bg-white p-4 rounded shadow border border-gray-100 border-b pb-2 text-gray-800">היסטוריית גרסאות</h2>
+        <div className="flex flex-col h-full overflow-hidden">
+          <div className="flex justify-between items-center mb-4 bg-white p-4 rounded shadow border border-gray-100 border-b pb-2 shrink-0">
+            <h2 className="text-lg md:text-xl font-semibold text-gray-800">היסטוריית גרסאות</h2>
+            {prompts.length > 2 && (
+              <button 
+                onClick={() => setIsHistoryModalOpen(true)}
+                className="text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1 rounded transition font-medium"
+              >
+                הרחב רשימה (מסך מלא)
+              </button>
+            )}
+          </div>
           
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 overflow-y-auto pr-2 pb-2 flex-1">
             {prompts.map(p => (
-              <div key={p.id} className={`p-4 md:p-5 rounded-lg shadow-sm border transition ${p.is_active ? 'border-green-400 bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'}`}>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2 sm:gap-0">
-                  <h3 className="font-bold text-lg text-gray-800">{p.name}</h3>
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    {p.is_active ? (
-                      <span className="bg-green-500 text-white px-3 py-1 rounded text-xs font-bold w-full sm:w-auto text-center shadow-sm">פעיל כעת</span>
-                    ) : (
-                      <>
-                        <button onClick={() => activatePrompt(p.id)} className="flex-1 sm:flex-none text-sm bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 px-3 py-1 rounded transition font-medium">
-                          הגדר כפעיל
-                        </button>
-                        <button onClick={() => confirmDelete(p)} className="text-sm bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 px-3 py-1 rounded transition font-medium">
-                          מחק
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="bg-gray-50 p-3 rounded border border-gray-100 mb-3">
-                  <p className="text-gray-600 text-sm whitespace-pre-wrap max-h-32 overflow-y-auto">{p.content}</p>
-                </div>
-                {p.version_notes && (
-                  <div className="text-xs bg-yellow-50 border border-yellow-200 p-2 rounded text-yellow-800">
-                    <span className="font-bold">הערות: </span> {p.version_notes}
-                  </div>
-                )}
-              </div>
+              <PromptCard 
+                key={p.id}
+                prompt={p}
+                onDuplicate={handleDuplicate}
+                onActivate={activatePrompt}
+                onDelete={confirmDelete}
+                onViewTechnical={fetchTechnicalPrompt}
+              />
             ))}
             
             {prompts.length === 0 && (
-              <div className="bg-white p-8 rounded-lg shadow border border-gray-100 text-center">
+              <div className="bg-white p-8 rounded-lg shadow border border-gray-100 text-center mt-4 shrink-0">
                 <p className="text-gray-500">אין פרומפטים שמורים במערכת.</p>
               </div>
             )}
@@ -256,6 +256,23 @@ const HomePage = () => {
         cancelText="בטל"
         onConfirm={handleDelete}
         onCancel={() => setIsModalOpen(false)}
+      />
+
+      <ViewModal
+        isOpen={isViewModalOpen}
+        title="תצוגת פרומפט מערכת (System Envelope)"
+        content={technicalPromptContent}
+        onClose={() => setIsViewModalOpen(false)}
+      />
+
+      <HistoryModal 
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        prompts={prompts}
+        onDuplicate={handleDuplicate}
+        onActivate={activatePrompt}
+        onDelete={confirmDelete}
+        onViewTechnical={fetchTechnicalPrompt}
       />
     </div>
   );
