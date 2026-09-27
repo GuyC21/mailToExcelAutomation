@@ -5,8 +5,9 @@ import { formatDate, formatMoney, formatNumber } from '../../utils/format';
  * @param {{lines: object[], issues: object[], currency: string}} props
  */
 const LineItemsTable = ({ lines, issues, currency }) => {
-  const flagged = new Set(issues.filter((i) => i.line_number != null).map((i) => i.line_number));
-  if (!lines.length) return <p className="text-gray-500 text-sm">לא זוהו שורות חיוב.</p>;
+  const safeLines = lines || [];
+  const flagged = new Set((issues || []).filter((i) => i.line_number != null).map((i) => i.line_number));
+  if (!safeLines.length) return <p className="text-gray-500 text-sm">לא זוהו שורות חיוב.</p>;
 
   return (
     <div className="overflow-x-auto border border-gray-100 rounded">
@@ -22,7 +23,7 @@ const LineItemsTable = ({ lines, issues, currency }) => {
           </tr>
         </thead>
         <tbody>
-          {lines.map((line, idx) => (
+          {safeLines.map((line, idx) => (
             <tr key={line.line_number ?? idx} className={`border-t border-gray-100 ${flagged.has(line.line_number) ? 'bg-amber-50' : ''}`}>
               <td className="p-2 text-gray-500">{flagged.has(line.line_number) ? '⚠️' : line.line_number}</td>
               <td className="p-2 whitespace-nowrap">{formatDate(line.service_date)}</td>

@@ -19,7 +19,9 @@ const Field = ({ label, value }) => (
  */
 const ExtractionResultCard = ({ result }) => {
   const [showTechnical, setShowTechnical] = useState(false);
+  if (!result) return null; // defensive: a malformed API response must not crash the page
   const data = result.data;
+  const issues = result.issues || [];
   const period = data?.billing_period_start
     ? `${formatDate(data.billing_period_start)} – ${formatDate(data.billing_period_end)}`
     : null;
@@ -48,7 +50,7 @@ const ExtractionResultCard = ({ result }) => {
             <p className="text-sm text-gray-600">{result.error}</p>
           ) : (
             <>
-              <ValidationIssues issues={result.issues} error={result.error} />
+              <ValidationIssues issues={issues} error={result.error} />
               {data && (
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -59,8 +61,8 @@ const ExtractionResultCard = ({ result }) => {
                     <Field label="תקופת חיוב" value={period} />
                     <Field label="תנאי תשלום" value={data.payment_terms} />
                   </div>
-                  <LineItemsTable lines={data.line_items} issues={result.issues} currency={data.currency} />
-                  <TotalsSummary data={data} issues={result.issues} />
+                  <LineItemsTable lines={data.line_items} issues={issues} currency={data.currency} />
+                  <TotalsSummary data={data} issues={issues} />
                 </>
               )}
               <p className="text-xs text-gray-400">

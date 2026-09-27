@@ -11,7 +11,7 @@ const FORMAT_LABELS = { multipart: 'Webhook (multipart)', json: 'Webhook (JSON)'
  */
 const EmailPayloadCard = ({ email, results }) => {
   const [showHeaders, setShowHeaders] = useState(false);
-  const statusFor = (name) => results.find((r) => r.filename === name)?.status;
+  const statusFor = (name) => (results || []).find((r) => r?.filename === name)?.status;
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-100 overflow-hidden">
