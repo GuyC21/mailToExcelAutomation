@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from api.routes import prompts
+from api.routes import prompts, ingestion
 import contextlib
 
 @contextlib.asynccontextmanager
@@ -28,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"])
+app.include_router(ingestion.router, prefix="/api/ingestion", tags=["Ingestion"])
 
 @app.get("/")
 async def root():
