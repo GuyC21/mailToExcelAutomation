@@ -36,7 +36,6 @@ async def get_active_prompt(db: AsyncSession = Depends(get_db)):
 
 @router.post("/", response_model=PromptResponse)
 async def create_prompt(prompt: PromptCreate, db: AsyncSession = Depends(get_db)):
-    # If this is set to active, deactivate all others
     if prompt.is_active:
         await db.execute(update(PromptVersion).values(is_active=False))
         
@@ -48,17 +47,39 @@ async def create_prompt(prompt: PromptCreate, db: AsyncSession = Depends(get_db)
 
 @router.post("/{prompt_id}/activate")
 async def activate_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)):
-    # Verify it exists
     result = await db.execute(select(PromptVersion).where(PromptVersion.id == prompt_id))
     prompt = result.scalars().first()
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
         
-    # Deactivate all
     await db.execute(update(PromptVersion).values(is_active=False))
-    
-    # Activate selected
     prompt.is_active = True
     await db.commit()
-    
     return {"status": "success", "message": f"Prompt {prompt_id} activated"}
+
+@router.delete("/{prompt_id}")
+async def delete_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PromptVersion).where(PromptVersion.id == prompt_id))
+    prompt = result.scalars().first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    
+    if prompt.is_active:
+        raise HTTPException(status_code=400, detail="Cannot delete active prompt")
+        
+    await db.delete(prompt)
+    await db.commit()
+    
+    return {"status": "success", "message": f"Prompt {prompt_id} deleted"}
+
+class EnhanceRequest(BaseModel):
+    text: str
+
+@router.post("/enhance")
+async def enhance_prompt(request: EnhanceRequest):
+    if not request.text or len(request.text.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Text is required")
+        
+    from services.llm_service import enhance_prompt_text
+    enhanced_text = await enhance_prompt_text(request.text)
+    return {"enhanced_text": enhanced_text}
