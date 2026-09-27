@@ -13,14 +13,19 @@ GOOD_JSON = json.dumps({"supplier_name": "ספק", "total_amount": 10})
 class FakeGenai:
     """Mimics the parts of ``google.generativeai`` the provider uses."""
 
-    def __init__(self, failures):
+    def __init__(self, failures, upload_failures=None):
         self.failures, self.calls, self.deleted = failures, [], False
+        self.upload_failures = list(upload_failures or [])
+        self.upload_attempts = 0
         self.types = SimpleNamespace(GenerationConfig=lambda **kw: kw)
 
     def configure(self, api_key):
         pass
 
     def upload_file(self, path, mime_type):
+        self.upload_attempts += 1
+        if self.upload_failures:
+            raise RuntimeError(self.upload_failures.pop(0))
         return SimpleNamespace(name="files/1")
 
     def delete_file(self, name):
@@ -36,6 +41,25 @@ class FakeGenai:
                     raise RuntimeError(fake.failures[name])
                 return SimpleNamespace(text=GOOD_JSON)
         return Model()
+
+
+def test_gemini_retries_upload_after_dropped_connection(monkeypatch):
+    fake = FakeGenai({}, upload_failures=["[SSL: UNEXPECTED_EOF_WHILE_READING] eof", "[Errno 32] Broken pipe"])
+    monkeypatch.setattr(gemini_provider, "genai", fake)
+    monkeypatch.setattr(gemini_provider.time, "sleep", lambda _: None)
+    response = gemini_provider.GeminiProvider("key", ["m1"]).extract("sys", "f.pdf", "application/pdf")
+    assert response.model == "m1" and fake.upload_attempts == 3  # 2 dropped connections, then success
+
+
+def test_gemini_upload_gives_up_after_max_retries(monkeypatch):
+    fake = FakeGenai({}, upload_failures=["SSL: UNEXPECTED_EOF_WHILE_READING"] * 3)
+    monkeypatch.setattr(gemini_provider, "genai", fake)
+    monkeypatch.setattr(gemini_provider.time, "sleep", lambda _: None)
+    try:
+        gemini_provider.GeminiProvider("key", ["m1"]).extract("sys", "f.pdf", "application/pdf")
+        raise AssertionError("expected the upload error to propagate")
+    except RuntimeError as error:
+        assert "SSL" in str(error) and fake.upload_attempts == 3
 
 
 def test_gemini_falls_back_to_next_model_on_quota(monkeypatch):

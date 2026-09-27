@@ -1,5 +1,6 @@
 """Google Gemini provider (primary) with an ordered per-model fallback chain."""
 import logging
+import time
 from typing import List
 
 import google.generativeai as genai
@@ -14,15 +15,45 @@ from services.extraction.providers.base import (
 logger = logging.getLogger(__name__)
 
 # Errors worth trying the next model for: quota (429), unknown/retired model
-# (404) and transient overload (500/503). Anything else (bad request, safety
-# block) would fail identically on a sibling model, so we stop early.
-_FALLBACK_MARKERS = ("429", "quota", "resource_exhausted", "404", "not found", "500", "503", "unavailable", "overloaded")
+# (404), transient overload (500/503), and dropped-connection errors (SSL/EOF/
+# broken pipe/reset) — these are transport hiccups, not a verdict on the model,
+# so a fresh request (to the same or the next model) can simply succeed.
+# Anything else (bad request, safety block) would fail identically again, so
+# we stop early instead of burning the whole fallback chain on it.
+_FALLBACK_MARKERS = (
+    "429", "quota", "resource_exhausted", "404", "not found", "500", "503", "unavailable", "overloaded",
+    "ssl", "eof", "broken pipe", "connection reset", "connection aborted", "remotedisconnected",
+    "connectionerror", "timed out", "timeout",
+)
 _USER_PROMPT = "Extract the data from the attached document according to the system instructions."
+_UPLOAD_RETRIES = 3
+_UPLOAD_BACKOFF_SECONDS = 1.5
 
 
 def _is_retryable(error: Exception) -> bool:
     text = str(error).lower()
     return any(marker in text for marker in _FALLBACK_MARKERS)
+
+
+def _upload_with_retry(file_path: str, mime_type: str):
+    """Uploads the file, retrying transient network drops.
+
+    The upload happens once, before any model is tried, so without its own
+    retry a single dropped connection (SSL EOF, broken pipe) would fail the
+    whole document before the model-fallback chain even starts.
+    """
+    last_error: Exception | None = None
+    for attempt in range(1, _UPLOAD_RETRIES + 1):
+        try:
+            return genai.upload_file(file_path, mime_type=mime_type)
+        except Exception as error:
+            last_error = error
+            if attempt == _UPLOAD_RETRIES or not _is_retryable(error):
+                raise
+            logger.warning("Gemini upload attempt %d/%d failed (%s), retrying...",
+                           attempt, _UPLOAD_RETRIES, short_error(error, 120))
+            time.sleep(_UPLOAD_BACKOFF_SECONDS * attempt)
+    raise last_error  # pragma: no cover - loop always returns or raises above
 
 
 class GeminiProvider(ExtractionProvider):
@@ -40,7 +71,7 @@ class GeminiProvider(ExtractionProvider):
         return bool(self._api_key)
 
     def extract(self, system_prompt: str, file_path: str, mime_type: str) -> ProviderResponse:
-        uploaded = genai.upload_file(file_path, mime_type=mime_type)
+        uploaded = _upload_with_retry(file_path, mime_type)
         attempts = []
         try:
             for model_name in self._models:
