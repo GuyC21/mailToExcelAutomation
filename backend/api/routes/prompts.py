@@ -72,6 +72,38 @@ async def delete_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)):
     
     return {"status": "success", "message": f"Prompt {prompt_id} deleted"}
 
+@router.get("/{prompt_id}/technical")
+async def get_technical_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PromptVersion).where(PromptVersion.id == prompt_id))
+    prompt = result.scalars().first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+        
+    system_envelope = f"""You are a highly precise financial data extraction AI.
+Your task is to analyze the attached document and extract information based EXACTLY on the following user instructions:
+
+<USER_INSTRUCTIONS>
+{prompt.content}
+</USER_INSTRUCTIONS>
+
+You must return the extracted data EXCLUSIVELY as a valid JSON object matching this exact schema:
+{{
+  "supplier_name": "string or null",
+  "document_date": "YYYY-MM-DD or null",
+  "total_amount": number or null,
+  "line_items": [
+    {{
+      "description": "string",
+      "quantity": number,
+      "unit_price": number,
+      "total_price": number
+    }}
+  ]
+}}
+Do not include markdown formatting blocks (like ```json), explanations, or any other conversational text. Return ONLY the raw JSON object.
+"""
+    return {"technical_prompt": system_envelope}
+
 class EnhanceRequest(BaseModel):
     text: str
 

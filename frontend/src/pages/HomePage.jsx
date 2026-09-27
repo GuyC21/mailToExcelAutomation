@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import ConfirmModal from '../components/ConfirmModal';
+import ViewModal from '../components/ViewModal';
 
 const HomePage = () => {
   const [prompts, setPrompts] = useState([]);
@@ -10,9 +11,12 @@ const HomePage = () => {
   const [content, setContent] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Delete Modal state
+  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [promptToDelete, setPromptToDelete] = useState(null);
+  
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+  const [technicalPromptContent, setTechnicalPromptContent] = useState('');
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -119,6 +123,22 @@ const HomePage = () => {
     } finally {
       setIsModalOpen(false);
       setPromptToDelete(null);
+    }
+  };
+
+  const fetchTechnicalPrompt = async (id) => {
+    try {
+      const res = await fetch(`${API_URL}/api/prompts/${id}/technical`);
+      if (res.ok) {
+        const data = await res.json();
+        setTechnicalPromptContent(data.technical_prompt);
+        setIsViewModalOpen(true);
+      } else {
+        alert("שגיאה בטעינת הפרומפט הטכני");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("שגיאת רשת בטעינת הפרומפט הטכני");
     }
   };
 
