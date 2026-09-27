@@ -6,6 +6,7 @@ from typing import List
 from pydantic import BaseModel
 from database import get_db
 from models.prompt import PromptVersion
+from services.extraction.system_envelope import build_system_envelope
 
 router = APIRouter()
 
@@ -74,35 +75,16 @@ async def delete_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{prompt_id}/technical")
 async def get_technical_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)):
+    """Returns the exact system instruction the LLM receives for this prompt.
+
+    Built by the same function the extractor uses, so the Backoffice preview can
+    never drift from what is actually sent to the model.
+    """
     result = await db.execute(select(PromptVersion).where(PromptVersion.id == prompt_id))
     prompt = result.scalars().first()
     if not prompt:
         raise HTTPException(status_code=404, detail="Prompt not found")
-        
-    system_envelope = f"""You are a highly precise financial data extraction AI.
-Your task is to analyze the attached document and extract information based EXACTLY on the following user instructions:
-
-<USER_INSTRUCTIONS>
-{prompt.content}
-</USER_INSTRUCTIONS>
-
-You must return the extracted data EXCLUSIVELY as a valid JSON object matching this exact schema:
-{{
-  "supplier_name": "string or null",
-  "document_date": "YYYY-MM-DD or null",
-  "total_amount": number or null,
-  "line_items": [
-    {{
-      "description": "string",
-      "quantity": number,
-      "unit_price": number,
-      "total_price": number
-    }}
-  ]
-}}
-Do not include markdown formatting blocks (like ```json), explanations, or any other conversational text. Return ONLY the raw JSON object.
-"""
-    return {"technical_prompt": system_envelope}
+    return {"technical_prompt": build_system_envelope(prompt.content)}
 
 class EnhanceRequest(BaseModel):
     text: str

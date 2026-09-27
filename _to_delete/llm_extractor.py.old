@@ -57,20 +57,52 @@ You must return the extracted data EXCLUSIVELY as a valid JSON object matching t
 Ensure the JSON is valid, contains no markdown formatting (e.g., no ```json blocks), and no extra text.
 """
         
+        fallback_models = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash-light",
+            "gemini-3.7-flash-light",
+            "gemini-3.6-flash-light",
+            "gemini-3.5-flash-light"
+        ]
+
         try:
             # 2. Upload file to Gemini
             uploaded_file = genai.upload_file(file_path)
             
-            # 3. Initialize Model (Using gemini-1.5-flash for speed and multimodal support)
-            model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_envelope)
+            response = None
+            last_error = None
             
-            # 4. Generate Content
-            response = model.generate_content(
-                ["Please extract the requested data from this document.", uploaded_file],
-                generation_config=genai.types.GenerationConfig(
-                    response_mime_type="application/json",
-                ),
-            )
+            # 3 & 4. Initialize Model and Generate Content (With Smart Fallback)
+            for model_name in fallback_models:
+                try:
+                    print(f"Attempting extraction with model: {model_name}...")
+                    model = genai.GenerativeModel(model_name, system_instruction=system_envelope)
+                    
+                    response = model.generate_content(
+                        ["Please extract the requested data from this document.", uploaded_file],
+                        generation_config=genai.types.GenerationConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    print(f"Success with {model_name}!")
+                    break # Success!
+                except Exception as e:
+                    error_str = str(e)
+                    last_error = e
+                    # If it's a 429 quota error or 404 model not found, try the next model
+                    if "429" in error_str or "quota" in error_str.lower() or "404" in error_str:
+                        print(f"Model {model_name} failed ({error_str[:60]}...). Falling back to next model.")
+                        continue
+                    else:
+                        # If it's a different error (e.g. bad request, safety block), don't fallback
+                        raise e
+            
+            # If we exhausted all models, raise the last error
+            if not response:
+                raise last_error
             
             # Cleanup file from Gemini servers
             genai.delete_file(uploaded_file.name)
@@ -96,19 +128,25 @@ Ensure the JSON is valid, contains no markdown formatting (e.g., no ```json bloc
             validated_data = InvoiceExtraction(**extracted_dict)
             data_dict = validated_data.model_dump()
             
-            # Math Validation Fallback: Does sum of line items roughly equal total amount?
-            # Note: Sometimes total includes VAT, sometimes line items include VAT.
-            # We'll do a loose check: if line items exist, their sum should be > 0.
-            # If total_amount < sum(line_items), something might be mathematically wrong.
+            # Math Validation Fallback: Does sum of line items match the total?
             sum_lines = sum(item["amount"] for item in data_dict["line_items"])
+            total_amount = data_dict["total_amount"]
+            vat_amount = data_dict.get("vat_amount", 0.0)
             
-            # If there's a significant mismatch (> 5 difference to account for rounding/VAT)
-            if sum_lines > 0 and abs(sum_lines - data_dict["total_amount"]) > abs(data_dict["vat_amount"]) + 5:
-                 return {
-                    "status": "WARNING_MATH_MISMATCH",
-                    "data": data_dict,
-                    "error": f"Math mismatch: Sum of lines ({sum_lines}) vs Total ({data_dict['total_amount']})"
-                }
+            if sum_lines > 0:
+                # Invoice Model A: Line items are before VAT
+                diff_before_vat = abs((sum_lines + vat_amount) - total_amount)
+                
+                # Invoice Model B: Line items already include VAT
+                diff_includes_vat = abs(sum_lines - total_amount)
+                
+                # If neither mathematical model works (allowing a tiny 2.0 margin for rounding)
+                if diff_before_vat > 2.0 and diff_includes_vat > 2.0:
+                     return {
+                        "status": "WARNING_MATH_MISMATCH",
+                        "data": data_dict,
+                        "error": f"Math mismatch: Sum of lines ({sum_lines}) + VAT ({vat_amount}) does not equal Total ({total_amount})"
+                    }
             
             return {
                 "status": "VALID",
@@ -126,10 +164,9 @@ Ensure the JSON is valid, contains no markdown formatting (e.g., no ```json bloc
     def _mock_extraction(self, prompt_text: str, file_path: str) -> dict:
         """Fallback mock for local dev without API keys."""
         import time
-        time.sleep(1.5) # Simulate network delay
+        time.sleep(1.5)
         filename = os.path.basename(file_path)
         
-        # Simulate math error if filename contains 'error'
         if "error" in filename.lower():
              return {
                 "status": "WARNING_MATH_MISMATCH",
@@ -138,12 +175,11 @@ Ensure the JSON is valid, contains no markdown formatting (e.g., no ```json bloc
                     "document_date": "2024-01-01",
                     "total_amount": 1000.0,
                     "vat_amount": 170.0,
-                    "line_items": [{"description": "Item A", "amount": 500.0}] # 500 != 1000
+                    "line_items": [{"description": "Item A", "amount": 500.0}]
                 },
                 "error": "Math mismatch: Sum of lines (500.0) vs Total (1000.0)"
             }
             
-        # Return valid mock
         return {
             "status": "VALID",
             "data": {
