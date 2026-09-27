@@ -41,7 +41,7 @@ const SandboxPage = () => {
 
       <ModeTabs mode={mode} onChange={setMode} disabled={isRunning} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 items-start gap-6 mb-6">
         <div className="lg:col-span-5">
           {mode === 'email' ? (
             <EmailComposer
@@ -54,7 +54,7 @@ const SandboxPage = () => {
           )}
         </div>
 
-        <div className="lg:col-span-7 space-y-4">
+        <div className="lg:col-span-7 w-full lg:max-h-[850px] overflow-y-auto pl-2 pb-2 custom-scrollbar space-y-4">
           {isRunning || error || !results.length ? (
             <ResultsPlaceholder isRunning={isRunning} error={error} mode={mode} />
           ) : (
