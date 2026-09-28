@@ -5,15 +5,21 @@ from pydantic import BaseModel, Field
 
 
 class EmailAttachment(BaseModel):
-    """An attachment with its raw bytes (never serialised back to clients)."""
+    """An attachment with its raw bytes (never serialised back to clients).
+
+    ``oversized`` attachments exceeded the per-file limit: their bytes were
+    never buffered (``content`` is empty) and they are reported as SKIPPED.
+    """
 
     filename: str
     content_type: str = "application/octet-stream"
     content: bytes = Field(repr=False)
+    oversized: bool = False
+    original_size: Optional[int] = None
 
     @property
     def size(self) -> int:
-        return len(self.content)
+        return self.original_size if self.original_size is not None else len(self.content)
 
 
 class InboundEmailPayload(BaseModel):
@@ -28,6 +34,10 @@ class InboundEmailPayload(BaseModel):
     body_text: str = ""
     headers: Dict[str, str] = Field(default_factory=dict)
     attachments: List[EmailAttachment] = Field(default_factory=list)
+    # Stable identity of this *delivery*, used to make webhook retries
+    # idempotent: the sender's Message-ID when present, otherwise a digest of
+    # the sender-provided content (never of values we stamp ourselves).
+    delivery_key: Optional[str] = None
 
 
 class JsonAttachment(BaseModel):

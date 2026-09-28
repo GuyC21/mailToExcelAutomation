@@ -7,11 +7,12 @@ Supported wire formats:
 """
 import base64
 import binascii
+import hashlib
 from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser, HeaderParser
 from email.utils import format_datetime, make_msgid
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from schemas.email_payload import EmailAttachment, InboundEmailPayload, JsonEmailRequest
 
@@ -28,8 +29,27 @@ def _headers_dict(message) -> Dict[str, str]:
     return result
 
 
+def _delivery_key(payload: InboundEmailPayload) -> str:
+    """Identity of the delivery, computed before anything is stamped on it.
+
+    A provider retry re-sends the same Message-ID; without one, the same
+    sender-provided content (headers + body + attachment bytes) is treated as
+    the same delivery.
+    """
+    if payload.message_id and payload.message_id.strip():
+        return "mid:" + payload.message_id.strip()
+    digest = hashlib.sha256()
+    for part in (payload.sender, payload.recipients, payload.subject, payload.sent_at or "", payload.body_text):
+        digest.update((part or "").encode("utf-8") + b"\x00")
+    for attachment in payload.attachments:
+        digest.update(attachment.filename.encode("utf-8") + b"\x00")
+        digest.update(hashlib.sha256(attachment.content).digest())
+    return "sig:" + digest.hexdigest()
+
+
 def _ensure_identity(payload: InboundEmailPayload) -> InboundEmailPayload:
     """Stamps Message-ID / Date when a webhook omits them, for traceability."""
+    payload.delivery_key = _delivery_key(payload)
     if not payload.message_id:
         payload.message_id = make_msgid(domain="inbound.goldencare.local")
         payload.headers.setdefault("Message-ID", payload.message_id)
@@ -40,7 +60,21 @@ def _ensure_identity(payload: InboundEmailPayload) -> InboundEmailPayload:
 
 
 def parse_eml(raw: bytes) -> InboundEmailPayload:
-    """Parses a raw MIME message, decoding RFC 2047 Hebrew subjects/filenames."""
+    """Parses a raw MIME message, decoding RFC 2047 Hebrew subjects/filenames.
+
+    Handles native EML formats usually forwarded directly from mailboxes.
+    Decodes potentially complex multi-part structures and properly extracts 
+    base64/quoted-printable components.
+
+    Args:
+        raw (bytes): The raw bytes of the EML message.
+
+    Returns:
+        InboundEmailPayload: A standardized payload representation of the email.
+
+    Raises:
+        EmailParseError: If the message cannot be parsed or lacks MIME format.
+    """
     try:
         message = BytesParser(policy=policy.default).parsebytes(raw)
     except Exception as error:
@@ -81,10 +115,20 @@ def parse_multipart(sender: str, to: str, subject: str, text: str, raw_headers: 
     ))
 
 
-def parse_json(request: JsonEmailRequest) -> InboundEmailPayload:
-    """Builds a payload from a JSON webhook body with base64 attachments."""
+def parse_json(request: JsonEmailRequest, max_attachment_bytes: Optional[int] = None) -> InboundEmailPayload:
+    """Builds a payload from a JSON webhook body with base64 attachments.
+
+    Attachments whose decoded size would exceed ``max_attachment_bytes`` are
+    flagged ``oversized`` without being decoded (the whole body is already
+    capped by the request-size middleware).
+    """
     attachments = []
     for item in request.attachments:
+        decoded_size = len(item.content_base64) * 3 // 4
+        if max_attachment_bytes is not None and decoded_size > max_attachment_bytes:
+            attachments.append(EmailAttachment(filename=item.filename, content_type=item.content_type,
+                                               content=b"", oversized=True, original_size=decoded_size))
+            continue
         try:
             content = base64.b64decode(item.content_base64, validate=True)
         except (binascii.Error, ValueError) as error:

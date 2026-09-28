@@ -4,8 +4,10 @@ services:
   db:
     image: postgres:15-alpine
     container_name: goldencare_db
+    # Loopback only: reachable from this machine (e.g. a backend run outside
+    # Docker), never from the network. Containers talk over the compose network.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -22,8 +24,10 @@ services:
     build:
       context: ./backend
     container_name: goldencare_backend
+    # Loopback only. The Backoffice API has no per-user auth; before exposing it
+    # beyond this machine set BACKOFFICE_API_KEY (and VITE_API_KEY for the UI).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-goldencare}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -32,6 +36,7 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - DEFAULT_VAT_RATE=${DEFAULT_VAT_RATE:-18}
       - INBOUND_EMAIL_TOKEN=${INBOUND_EMAIL_TOKEN:-}
+      - BACKOFFICE_API_KEY=${BACKOFFICE_API_KEY:-}
     volumes:
       - ./backend:/app
       - ./data:/app/data
@@ -45,12 +50,13 @@ services:
       context: ./frontend
     container_name: goldencare_frontend
     ports:
-      - "5173:5173"
+      - "127.0.0.1:5173:5173"
     volumes:
       - ./frontend:/app
       - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:8000
+      - VITE_API_KEY=${BACKOFFICE_API_KEY:-}
     depends_on:
       - backend
     command: npm run dev -- --host 0.0.0.0

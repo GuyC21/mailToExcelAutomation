@@ -52,7 +52,19 @@ def _offline_enhance(rough_text: str) -> str:
 
 
 async def enhance_prompt_text(rough_text: str) -> str:
-    """Expands a rough business prompt; degrades gracefully to a template."""
+    """Expands a rough business prompt; degrades gracefully to a template.
+
+    This function attempts to use AI to turn short user instructions into 
+    detailed extraction prompts. It includes a fallback mechanism (degrading to 
+    an offline template) to ensure the system remains functional even when 
+    external AI APIs are unavailable or unconfigured.
+
+    Args:
+        rough_text (str): The basic instructions provided by the user.
+
+    Returns:
+        str: The enhanced prompt text or a basic fallback template.
+    """
     settings = get_settings()
     try:
         if settings.gemini_api_key.strip():

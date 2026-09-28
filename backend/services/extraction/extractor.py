@@ -1,10 +1,10 @@
 """Extraction orchestrator: envelope -> provider chain -> JSON -> schema.
 
-Fallback policy (a design decision – see README):
+Fallback policy (a design decision - see README):
     1. Gemini (each configured model in order), then OpenAI if a key exists.
     2. The first provider whose answer parses into the schema wins.
     3. If every provider fails, the outcome is EXTRACTION_FAILED with the full
-       list of attempts – it is persisted and written to Excel like any other
+       list of attempts - it is persisted and written to Excel like any other
        document, so a failure is always visible and traceable, never swallowed.
     4. The mock provider is used only when no real provider is configured.
 """
@@ -30,7 +30,16 @@ _RAW_LIMIT = 20_000  # Cap stored raw responses to keep the audit table lean.
 
 @dataclass
 class ExtractionOutcome:
-    """Result of one extraction run, successful or not."""
+    """Result of one extraction run, successful or not.
+    
+    Attributes:
+        data: The validated data extraction, or None if extraction failed.
+        provider: The provider that succeeded, or None if all failed.
+        model: The model that succeeded, or None if all failed.
+        raw_response: The raw response from the provider, truncated.
+        error: A summary of errors if extraction failed.
+        attempts: Audit trail of all provider attempts.
+    """
 
     data: Optional[DocumentExtraction]
     provider: Optional[str] = None
@@ -41,11 +50,22 @@ class ExtractionOutcome:
 
     @property
     def succeeded(self) -> bool:
+        """Returns whether the extraction produced valid data."""
         return self.data is not None
 
 
 def _strip_fences(text: str) -> str:
-    """Removes ```json fences some models add despite instructions."""
+    """Removes ```json fences some models add despite instructions.
+
+    Models occasionally add Markdown formatting around their JSON payload
+    even when instructed to return pure JSON, so this strips it out.
+
+    Args:
+        text: The raw text returned by the LLM.
+
+    Returns:
+        The cleaned text containing only the JSON payload.
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.split("\n", 1)[-1]
@@ -56,14 +76,26 @@ def _strip_fences(text: str) -> str:
 class DocumentExtractor:
     """Runs a document through the configured provider chain."""
 
-    def __init__(self, providers: List[ExtractionProvider]):
+    def __init__(self, providers: List[ExtractionProvider]) -> None:
+        """Initializes the DocumentExtractor with an ordered list of providers.
+
+        Args:
+            providers: A list of provider implementations to attempt in sequence.
+        """
         self._providers = providers
 
     @classmethod
-    def from_settings(cls, settings: Settings | None = None) -> "DocumentExtractor":
-        """Builds the provider chain from configuration."""
+    def from_settings(cls, settings: Optional[Settings] = None) -> "DocumentExtractor":
+        """Builds the provider chain from configuration.
+
+        Args:
+            settings: Optional explicit settings to use; defaults to the global settings.
+
+        Returns:
+            A fully configured DocumentExtractor instance.
+        """
         settings = settings or get_settings()
-        real = [
+        real: List[ExtractionProvider] = [
             GeminiProvider(settings.gemini_api_key, settings.gemini_model_chain),
             OpenAIProvider(settings.openai_api_key, settings.openai_model),
         ]
@@ -72,10 +104,25 @@ class DocumentExtractor:
 
     @property
     def provider_names(self) -> List[str]:
+        """Gets the names of the providers configured for this extractor."""
         return [p.name for p in self._providers]
 
     async def extract(self, business_prompt: str, file_path: str, mime_type: str) -> ExtractionOutcome:
-        """Extracts structured data; never raises – failures are returned."""
+        """Extracts structured data; never raises – failures are returned.
+
+        This method coordinates the system prompt building, attempts extraction
+        with each provider in turn, handles transient and permanent failures,
+        and ensures the output conforms to the Pydantic schema.
+
+        Args:
+            business_prompt: The dynamic instructions authored by the user.
+            file_path: Path to the local file to process.
+            mime_type: The MIME type of the document.
+
+        Returns:
+            An ExtractionOutcome capturing either the successfully validated data
+            or the consolidated failure reasons from all attempts.
+        """
         system_prompt = build_system_envelope(business_prompt)
         attempts: List[dict] = []
         last_raw = ""
@@ -103,7 +150,14 @@ class DocumentExtractor:
 
     @staticmethod
     def _summarise(attempts: List[dict]) -> str:
-        """Human-readable Hebrew summary of why every attempt failed."""
+        """Human-readable Hebrew summary of why every attempt failed.
+
+        Args:
+            attempts: A list of dicts describing the failure details per model attempted.
+
+        Returns:
+            A combined error summary string intended for end-user display.
+        """
         if not attempts:
             return "לא הוגדר אף ספק AI זמין"
         text = " | ".join(f"{a['provider']}/{a.get('model') or '-'}: {a['error'][:140]}" for a in attempts)

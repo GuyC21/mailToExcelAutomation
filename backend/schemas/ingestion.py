@@ -25,6 +25,10 @@ class IngestionResult(BaseModel):
     error: Optional[str] = None
     attempts: List[Dict[str, Any]] = []
     excel: Optional[ExcelWriteResult] = None
+    # True when this attachment was already ingested from an earlier delivery
+    # of the same email: the fields describe that original record, and no new
+    # record was created.
+    duplicate: bool = False
 
 
 class EmailAttachmentInfo(BaseModel):

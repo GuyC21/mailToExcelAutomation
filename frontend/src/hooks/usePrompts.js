@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+import { API_URL, authHeaders } from '../api/client';
 
 export function usePrompts() {
   const [prompts, setPrompts] = useState([]);
@@ -8,7 +7,7 @@ export function usePrompts() {
 
   const fetchPrompts = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/prompts/`);
+      const res = await fetch(`${API_URL}/api/prompts/`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setPrompts(data);
@@ -22,7 +21,7 @@ export function usePrompts() {
 
   const activatePrompt = async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/prompts/${id}/activate`, { method: 'POST' });
+      const res = await fetch(`${API_URL}/api/prompts/${id}/activate`, { method: 'POST', headers: authHeaders() });
       if (res.ok) {
         fetchPrompts();
       }
@@ -33,7 +32,7 @@ export function usePrompts() {
 
   const deletePrompt = async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/prompts/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_URL}/api/prompts/${id}`, { method: 'DELETE', headers: authHeaders() });
       if (res.ok) {
         fetchPrompts();
         return { success: true };
@@ -49,7 +48,7 @@ export function usePrompts() {
 
   const getTechnicalPrompt = async (id) => {
     try {
-      const res = await fetch(`${API_URL}/api/prompts/${id}/technical`);
+      const res = await fetch(`${API_URL}/api/prompts/${id}/technical`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         return { success: true, content: data.technical_prompt };

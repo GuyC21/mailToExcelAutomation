@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # Ordered fallback chain. Free-tier quotas are per model, so falling back to
     # a sibling model on 429/404 keeps the pipeline alive during demos.
-    gemini_models: str = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite"
+    gemini_models: str = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3-flash,gemini-2.5-flash,gemini-2.5-flash-lite"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 
@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     excel_path: str = "data/GoldenCare_Master.xlsx"
     inbox_dir: str = "data/inbox"
     max_upload_mb: int = 15
+    # Hard cap on any request body (all attachments of one email together).
+    # Enforced while streaming, before the body is buffered or spooled.
+    max_request_mb: int = 60
+    max_email_attachments: int = 20
 
     # --- Business rules ---------------------------------------------------
     # Used only when the document does not print its own VAT rate.
@@ -42,6 +46,10 @@ class Settings(BaseSettings):
     # --- Security ---------------------------------------------------------
     # When set, inbound-email webhooks must send header ``X-Inbound-Token``.
     inbound_email_token: str = ""
+    # When set, every Backoffice API route requires header ``X-API-Key`` (or
+    # ``?api_key=`` for plain links such as downloads / previews). Empty keeps
+    # the local-demo behaviour; set it before exposing the API beyond localhost.
+    backoffice_api_key: str = ""
 
     @property
     def gemini_model_chain(self) -> List[str]:

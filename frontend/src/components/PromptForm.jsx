@@ -1,12 +1,11 @@
 import React, { useState, forwardRef, useImperativeHandle } from 'react';
+import { API_URL, authHeaders } from '../api/client';
 
 const PromptForm = forwardRef(({ onSuccess }, ref) => {
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
   const [notes, setNotes] = useState('');
   const [isEnhancing, setIsEnhancing] = useState(false);
-
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
   // Expose a method to populate the form from outside (for the "Duplicate" feature)
   useImperativeHandle(ref, () => ({
@@ -27,7 +26,7 @@ const PromptForm = forwardRef(({ onSuccess }, ref) => {
     try {
       const res = await fetch(`${API_URL}/api/prompts/enhance`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ text: content })
       });
       if (res.ok) {
@@ -49,7 +48,7 @@ const PromptForm = forwardRef(({ onSuccess }, ref) => {
     try {
       const res = await fetch(`${API_URL}/api/prompts/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           name,
           content,
