@@ -1,0 +1,197 @@
+import os
+import json
+import base64
+from pydantic import BaseModel, Field, ValidationError
+from typing import List, Optional
+import google.generativeai as genai
+
+# 1. Pydantic Models for Strict Validation
+class LineItem(BaseModel):
+    description: str = Field(..., description="Description of the item or service")
+    amount: float = Field(..., description="Cost or amount of the item")
+
+class InvoiceExtraction(BaseModel):
+    supplier_name: str = Field(..., description="The name of the supplier or business")
+    document_date: str = Field(..., description="The date of the document in YYYY-MM-DD format")
+    total_amount: float = Field(..., description="The final total amount to pay, including VAT")
+    vat_amount: float = Field(..., description="The VAT (Tax) amount. If not specified, calculate 17% of subtotal, or 0 if exempt.")
+    line_items: List[LineItem] = Field(default_factory=list, description="List of individual items/services charged")
+
+class LLMExtractor:
+    def __init__(self):
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.is_mock = not self.api_key or self.api_key.strip() == ""
+        if not self.is_mock:
+            genai.configure(api_key=self.api_key)
+
+    def extract_from_file(self, prompt_text: str, file_path: str) -> dict:
+        """
+        Takes the user's business prompt, wraps it in the technical envelope,
+        sends it to Gemini with the file, and validates the response.
+        Returns a dict: {"status": str, "data": dict, "error": str}
+        """
+        if self.is_mock:
+            return self._mock_extraction(prompt_text, file_path)
+
+        # 1. Prepare the System Envelope
+        system_envelope = f"""You are a highly precise financial data extraction AI.
+Your task is to analyze the attached document and extract information based EXACTLY on the following user instructions:
+
+<USER_INSTRUCTIONS>
+{prompt_text}
+</USER_INSTRUCTIONS>
+
+You must return the extracted data EXCLUSIVELY as a valid JSON object matching this exact schema:
+{{
+  "supplier_name": "string",
+  "document_date": "YYYY-MM-DD",
+  "total_amount": float,
+  "vat_amount": float,
+  "line_items": [
+    {{
+      "description": "string",
+      "amount": float
+    }}
+  ]
+}}
+Ensure the JSON is valid, contains no markdown formatting (e.g., no ```json blocks), and no extra text.
+"""
+        
+        fallback_models = [
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash-light",
+            "gemini-3.7-flash-light",
+            "gemini-3.6-flash-light",
+            "gemini-3.5-flash-light"
+        ]
+
+        try:
+            # 2. Upload file to Gemini
+            uploaded_file = genai.upload_file(file_path)
+            
+            response = None
+            last_error = None
+            
+            # 3 & 4. Initialize Model and Generate Content (With Smart Fallback)
+            for model_name in fallback_models:
+                try:
+                    print(f"Attempting extraction with model: {model_name}...")
+                    model = genai.GenerativeModel(model_name, system_instruction=system_envelope)
+                    
+                    response = model.generate_content(
+                        ["Please extract the requested data from this document.", uploaded_file],
+                        generation_config=genai.types.GenerationConfig(
+                            response_mime_type="application/json",
+                        ),
+                    )
+                    print(f"Success with {model_name}!")
+                    break # Success!
+                except Exception as e:
+                    error_str = str(e)
+                    last_error = e
+                    # If it's a 429 quota error or 404 model not found, try the next model
+                    if "429" in error_str or "quota" in error_str.lower() or "404" in error_str:
+                        print(f"Model {model_name} failed ({error_str[:60]}...). Falling back to next model.")
+                        continue
+                    else:
+                        # If it's a different error (e.g. bad request, safety block), don't fallback
+                        raise e
+            
+            # If we exhausted all models, raise the last error
+            if not response:
+                raise last_error
+            
+            # Cleanup file from Gemini servers
+            genai.delete_file(uploaded_file.name)
+            
+            # 5. Parse JSON
+            raw_json = response.text
+            extracted_dict = json.loads(raw_json)
+            
+            # 6. Validate via Pydantic & Math Checks
+            return self._validate_and_flag(extracted_dict)
+            
+        except Exception as e:
+            return {
+                "status": "EXTRACTION_FAILED",
+                "data": {},
+                "error": f"LLM or Parsing Error: {str(e)}"
+            }
+
+    def _validate_and_flag(self, extracted_dict: dict) -> dict:
+        """Validates the schema and performs business math checks."""
+        try:
+            # Pydantic Schema Validation
+            validated_data = InvoiceExtraction(**extracted_dict)
+            data_dict = validated_data.model_dump()
+            
+            # Math Validation Fallback: Does sum of line items match the total?
+            sum_lines = sum(item["amount"] for item in data_dict["line_items"])
+            total_amount = data_dict["total_amount"]
+            vat_amount = data_dict.get("vat_amount", 0.0)
+            
+            if sum_lines > 0:
+                # Invoice Model A: Line items are before VAT
+                diff_before_vat = abs((sum_lines + vat_amount) - total_amount)
+                
+                # Invoice Model B: Line items already include VAT
+                diff_includes_vat = abs(sum_lines - total_amount)
+                
+                # If neither mathematical model works (allowing a tiny 2.0 margin for rounding)
+                if diff_before_vat > 2.0 and diff_includes_vat > 2.0:
+                     return {
+                        "status": "WARNING_MATH_MISMATCH",
+                        "data": data_dict,
+                        "error": f"Math mismatch: Sum of lines ({sum_lines}) + VAT ({vat_amount}) does not equal Total ({total_amount})"
+                    }
+            
+            return {
+                "status": "VALID",
+                "data": data_dict,
+                "error": ""
+            }
+            
+        except ValidationError as e:
+            return {
+                "status": "EXTRACTION_FAILED",
+                "data": extracted_dict,
+                "error": f"Schema Validation Error: {str(e)}"
+            }
+
+    def _mock_extraction(self, prompt_text: str, file_path: str) -> dict:
+        """Fallback mock for local dev without API keys."""
+        import time
+        time.sleep(1.5)
+        filename = os.path.basename(file_path)
+        
+        if "error" in filename.lower():
+             return {
+                "status": "WARNING_MATH_MISMATCH",
+                "data": {
+                    "supplier_name": "Mock Supplier Ltd (Error)",
+                    "document_date": "2024-01-01",
+                    "total_amount": 1000.0,
+                    "vat_amount": 170.0,
+                    "line_items": [{"description": "Item A", "amount": 500.0}]
+                },
+                "error": "Math mismatch: Sum of lines (500.0) vs Total (1000.0)"
+            }
+            
+        return {
+            "status": "VALID",
+            "data": {
+                "supplier_name": "Mock Supplier Ltd",
+                "document_date": "2024-01-01",
+                "total_amount": 117.0,
+                "vat_amount": 17.0,
+                "line_items": [
+                    {"description": "Consulting Services", "amount": 100.0}
+                ]
+            },
+            "error": ""
+        }
+
+llm_extractor = LLMExtractor()

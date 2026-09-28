@@ -70,3 +70,9 @@ Thumbs.db
 !.vscode/extensions.json
 *.swp
 *.swo
+
+# Runtime documents received by the pipeline (supplier PII) and generated workbooks
+data/inbox/
+data/*.legacy-*.xlsx
+data/*.xlsx.tmp
+.pytest_cache/
