@@ -1,5 +1,5 @@
 {
-  "document_type": null,
+  "document_type": "מסמך התחשבנות ספק מוסדי",
   "document_number": "SLH-88421",
   "document_date": "2026-08-30",
   "billing_period_start": null,
@@ -7,9 +7,9 @@
   "due_date": null,
   "supplier_name": "ש.ל.ה שירותי לוגיסטיקה והסעות רפואיות בע\"מ",
   "supplier_tax_id": "512998410",
-  "customer_name": null,
+  "customer_name": "GoldenCare",
   "currency": "ILS",
-  "payment_terms": null,
+  "payment_terms": "שוטף + 45",
   "line_items": [
     {
       "line_number": 1,
@@ -22,7 +22,7 @@
     {
       "line_number": 2,
       "service_date": null,
-      "description": "שינוע דגימות מעבדה",
+      "description": "שינוע דגימות מעבדה וציוד סטרילי בקירור (8-2 מעלות)",
       "quantity": 22.0,
       "unit_price": 150.0,
       "line_total": 3300.0
@@ -30,7 +30,7 @@
     {
       "line_number": 3,
       "service_date": null,
-      "description": "הזנקת חירום לילית",
+      "description": "הזנקת חירום לילית - פינוי מטופל בליווי חובש",
       "quantity": 2.0,
       "unit_price": 700.0,
       "line_total": 1400.0

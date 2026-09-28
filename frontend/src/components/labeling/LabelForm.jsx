@@ -126,7 +126,7 @@ const LabelForm = ({ caseName, onCaseNameChange, isNewCase, initialExpected, onF
     <div className="bg-white rounded-lg shadow border border-gray-100 p-4 md:p-6 space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <FormField
-          label="שם התיק (מזהה קובץ, אותיות/ספרות באנגלית)"
+          label="שם הקובץ באנגלית"
           value={caseName}
           onChange={(value) => { setNameTouched(true); onCaseNameChange(slugifyCaseName(value)); }}
           placeholder="shl_valid"

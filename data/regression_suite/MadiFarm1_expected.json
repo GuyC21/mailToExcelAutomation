@@ -1,0 +1,52 @@
+{
+  "document_type": "טופס התחשבנות",
+  "document_number": "MP-2026-0894",
+  "document_date": "2026-09-15",
+  "billing_period_start": "2026-08-01",
+  "billing_period_end": "2026-08-31",
+  "due_date": null,
+  "supplier_name": "מדי-פארם ציוד רפואי וסיעודי בע\"מ",
+  "supplier_tax_id": "514892031",
+  "customer_name": "גולדנקייר שירותי סיעוד ורפואה בע\"מ",
+  "currency": "ILS",
+  "payment_terms": "שוטף + 30",
+  "line_items": [
+    {
+      "line_number": 1,
+      "service_date": "2026-08-04",
+      "description": "ערכות ציוד סיעודי מתכלה - אספקה חודשית מרוכזת",
+      "quantity": 25.0,
+      "unit_price": 320.0,
+      "line_total": 8000.0
+    },
+    {
+      "line_number": 2,
+      "service_date": "2026-08-28",
+      "description": "תחזוקה תקופתית וכיול מכשירי ניטור ומדדי לחץ דם",
+      "quantity": 12.0,
+      "unit_price": 250.0,
+      "line_total": 3000.0
+    },
+    {
+      "line_number": 3,
+      "service_date": "2026-08-20",
+      "description": "השכרת מיטות סיעודיות חשמליות ומזרני לחץ דינמיים",
+      "quantity": 8.0,
+      "unit_price": 450.0,
+      "line_total": 3600.0
+    },
+    {
+      "line_number": 4,
+      "service_date": "2026-09-28",
+      "description": "מילוי ואספקה דחופה של מחוליי ובלוני חמצן",
+      "quantity": 5.0,
+      "unit_price": 280.0,
+      "line_total": 1400.0
+    }
+  ],
+  "subtotal": 16000.0,
+  "vat_rate": 17.0,
+  "vat_amount": 2720.0,
+  "total_amount": 18720.0,
+  "extraction_notes": []
+}
