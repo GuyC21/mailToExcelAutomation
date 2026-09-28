@@ -9,7 +9,7 @@ import models.app_metadata  # noqa: F401  (registers tables with Base.metadata)
 import models.ingestion  # noqa: F401
 import models.processed_attachment  # noqa: F401
 import models.prompt  # noqa: F401
-import models.regression  # noqa: F401
+import models.regression  # noqa: F401 (registers RegressionRun for Run History)
 from api.routes import email, excel, ingestion, prompts, regression, dashboard, documents
 from api.security import require_backoffice_key
 from api.uploads import MB, BodySizeLimitMiddleware

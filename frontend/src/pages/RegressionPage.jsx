@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { useRegression } from '../hooks/useRegression';
-import { Play, AlertTriangle, FileText } from 'lucide-react';
+import { Play, AlertTriangle, FileText, History } from 'lucide-react';
 import CaseCard from '../components/regression/CaseCard';
 import ScoreGauge from '../components/regression/ScoreGauge';
+import RunHistoryPanel from '../components/regression/RunHistoryPanel';
+import RunCompareView from '../components/regression/RunCompareView';
 
 /**
  * RegressionPage Component
@@ -16,10 +18,30 @@ import ScoreGauge from '../components/regression/ScoreGauge';
  * @returns {JSX.Element} The rendered Regression page.
  */
 export default function RegressionPage() {
-  const { report, loading, error, runSuite, prompts } = useRegression();
+  const {
+    report, loading, error, runSuite, prompts,
+    history, historyLoading, historyError, deleteRun,
+    comparison, compareLoading, compareError, compareRuns, clearComparison,
+  } = useRegression();
   const [promptId, setPromptId] = useState('');
+  const [tab, setTab] = useState('run'); // 'run' | 'history'
+  const [selectedRuns, setSelectedRuns] = useState([]);
   const summary = report?.summary;
   const results = report?.results || [];
+
+  const toggleSelectRun = (id) => {
+    setSelectedRuns((current) => (current.includes(id) ? current.filter((x) => x !== id)
+      : current.length >= 2 ? current : [...current, id]));
+  };
+
+  const handleCompare = () => {
+    if (selectedRuns.length === 2) compareRuns(selectedRuns[0], selectedRuns[1]);
+  };
+
+  const handleDeleteRun = async (id) => {
+    await deleteRun(id);
+    setSelectedRuns((current) => current.filter((x) => x !== id));
+  };
 
   return (
     <div className="w-full space-y-6">
@@ -28,6 +50,7 @@ export default function RegressionPage() {
           <h1 className="text-2xl md:text-3xl font-bold text-blue-900">בדיקות רגרסיה (Regression)</h1>
           <p className="text-gray-500 mt-1">הרצת בדיקות אלגוריתמיות מול Ground Truth</p>
         </div>
+        {tab === 'run' && (
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
         <select
           value={promptId}
@@ -63,16 +86,39 @@ export default function RegressionPage() {
           )}
         </button>
         </div>
+        )}
       </header>
 
-      {error && (
+      <div className="flex gap-1 bg-white p-1 rounded-lg shadow-sm border border-gray-100 w-fit">
+        <button
+          onClick={() => setTab('run')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition ${
+            tab === 'run' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <Play className="w-4 h-4" /> הרצה נוכחית
+        </button>
+        <button
+          onClick={() => setTab('history')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold transition ${
+            tab === 'history' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <History className="w-4 h-4" /> היסטוריה והשוואת A/B
+          {history.length > 0 && (
+            <span className="bg-gray-100 text-gray-600 text-xs rounded-full px-1.5 py-0.5">{history.length}</span>
+          )}
+        </button>
+      </div>
+
+      {tab === 'run' && error && (
         <div className="bg-red-50 text-red-600 p-4 rounded-lg flex items-center gap-2 shadow-sm border border-red-100">
           <AlertTriangle className="w-5 h-5" />
           <p>{error}</p>
         </div>
       )}
 
-      {report && summary && (
+      {tab === 'run' && report && summary && (
         <div className="space-y-6">
           <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 text-sm text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
             <span>פרומפט: <b className="text-gray-800">{report.prompt?.name || '—'}</b>{report.prompt?.is_active === false && ' (לא פעיל – בדיקה מקדימה)'}</span>
@@ -125,11 +171,40 @@ export default function RegressionPage() {
         </div>
       )}
       
-      {!report && !loading && !error && (
+      {tab === 'run' && !report && !loading && !error && (
         <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
           <FileText className="w-12 h-12 text-gray-300 mx-auto mb-3" />
           <h3 className="text-lg font-medium text-gray-600">אין נתונים להצגה</h3>
           <p className="text-gray-500 text-sm mt-1">לחץ על כפתור ההרצה כדי להתחיל בדיקת רגרסיה</p>
+        </div>
+      )}
+
+      {tab === 'history' && (
+        <div className="space-y-6">
+          {compareError && (
+            <div className="bg-red-50 text-red-600 p-4 rounded-lg flex items-center gap-2 shadow-sm border border-red-100">
+              <AlertTriangle className="w-5 h-5" />
+              <p>{compareError}</p>
+            </div>
+          )}
+
+          {comparison && (
+            <RunCompareView
+              comparison={comparison}
+              onClose={() => { clearComparison(); setSelectedRuns([]); }}
+            />
+          )}
+
+          <RunHistoryPanel
+            runs={history}
+            loading={historyLoading}
+            error={historyError}
+            selected={selectedRuns}
+            onToggleSelect={toggleSelectRun}
+            onDelete={handleDeleteRun}
+            onCompare={handleCompare}
+            compareLoading={compareLoading}
+          />
         </div>
       )}
     </div>

@@ -25,9 +25,20 @@ from api.uploads import MB, read_upload_or_413
 from config import get_settings
 from database import get_db
 from models.prompt import PromptVersion
+from models.regression import RegressionRun
 from repositories.prompt_repository import get_active_prompt
 from schemas.extraction import DocumentExtraction
-from schemas.regression import RegressionCaseDeleteResult, RegressionCaseSaveResult, RegressionCaseSummary
+from schemas.regression import (
+    RegressionCaseComparison,
+    RegressionCaseDeleteResult,
+    RegressionCaseSaveResult,
+    RegressionCaseSummary,
+    RegressionCompareResponse,
+    RegressionRunDeleteResult,
+    RegressionRunDetail,
+    RegressionRunListResponse,
+    RegressionRunSummary,
+)
 from services.extraction.providers.base import short_error
 from services.regression.labeling import (
     CaseNotFoundError,
@@ -93,7 +104,180 @@ async def run_regression_suite(
     except Exception as error:
         logger.exception("Regression run failed")
         raise HTTPException(status_code=500, detail=str(error)) from error
-    return RegressionResponse(success=True, data=report.to_dict())
+
+    run = await _persist_run(report, prompt, db)
+
+    data = report.to_dict()
+    data["id"] = run.id
+    data["created_at"] = run.created_at.isoformat()
+    return RegressionResponse(success=True, data=data)
+
+
+async def _persist_run(report, prompt: PromptVersion, db: AsyncSession) -> RegressionRun:
+    """Saves a finished run as one ``RegressionRun`` row (Run History).
+
+    A plain snapshot of ``report`` - see ``models.regression.RegressionRun``.
+    Never recomputes anything: the scoring formula is untouched by this.
+    """
+    summary = report.to_dict()["summary"]
+    run = RegressionRun(
+        prompt_version_id=prompt.id, prompt_name=prompt.name, prompt_is_active=bool(prompt.is_active),
+        suite_dir=report.suite_dir, generated_at=report.generated_at, pass_threshold=report.pass_threshold,
+        providers=report.providers, warnings=report.warnings,
+        total=summary["total"], passed=summary["passed"], failed=summary["failed"], scored=summary["scored"],
+        coverage=summary["coverage"], average_score=summary["average_score"],
+        scored_average_score=summary["scored_average_score"],
+        results=[r.to_dict() for r in report.results],
+    )
+    db.add(run)
+    await db.commit()
+    await db.refresh(run)
+    return run
+
+
+# ---------------------------------------------------------------------------
+# Run History – persisted past runs, and A/B comparison between two of them.
+# ---------------------------------------------------------------------------
+
+@router.get("/runs", response_model=RegressionRunListResponse)
+async def list_runs(
+    prompt_id: Optional[int] = Query(None, description="Only runs of this prompt version."),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+) -> RegressionRunListResponse:
+    """Lists past regression runs, newest first, for the Run History view.
+
+    Args:
+        prompt_id (Optional[int]): Restrict to runs made with this prompt version.
+        limit (int): Maximum rows to return (default 50, max 200).
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        RegressionRunListResponse: Run summaries (no per-case detail - use
+            ``GET /runs/{run_id}`` for that).
+    """
+    stmt = select(RegressionRun).order_by(RegressionRun.id.desc()).limit(limit)
+    if prompt_id is not None:
+        stmt = stmt.where(RegressionRun.prompt_version_id == prompt_id)
+    rows = (await db.execute(stmt)).scalars().all()
+    return RegressionRunListResponse(runs=[RegressionRunSummary.from_run(row) for row in rows])
+
+
+async def _get_run_or_404(run_id: int, db: AsyncSession) -> RegressionRun:
+    run = (await db.execute(select(RegressionRun).where(RegressionRun.id == run_id))).scalars().first()
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"הרצה {run_id} לא נמצאה")
+    return run
+
+
+def _case_side(result: Dict[str, Any]) -> Dict[str, Any]:
+    """One run's stored ``TestCaseResult.to_dict()`` reduced to what Compare needs."""
+    score = result.get("score") or {}
+    return {
+        "passed": bool(result.get("passed")),
+        "score": score.get("overall_score"),
+        "critical_failures": result.get("critical_failures") or [],
+        "error": result.get("error"),
+    }
+
+
+def _diff_cases(results_a: List[Dict[str, Any]], results_b: List[Dict[str, Any]]) -> List[RegressionCaseComparison]:
+    """Aligns two runs' per-case results by case name and classifies each pair.
+
+    Pure read-side diffing over already-scored results - it never re-scores
+    anything, so a change here can never affect ``services.regression.scorer``.
+    """
+    by_a = {r["name"]: r for r in (results_a or [])}
+    by_b = {r["name"]: r for r in (results_b or [])}
+    comparisons: List[RegressionCaseComparison] = []
+    for name in sorted(set(by_a) | set(by_b)):
+        raw_a, raw_b = by_a.get(name), by_b.get(name)
+        a = _case_side(raw_a) if raw_a else None
+        b = _case_side(raw_b) if raw_b else None
+        score_delta = (round(b["score"] - a["score"], 2)
+                      if a and b and a["score"] is not None and b["score"] is not None else None)
+        if a is None:
+            status = "only_b"
+        elif b is None:
+            status = "only_a"
+        elif a["passed"] == b["passed"]:
+            status = "unchanged"
+        elif b["passed"]:
+            status = "improved"
+        else:
+            status = "regressed"
+        comparisons.append(RegressionCaseComparison(name=name, a=a, b=b, score_delta=score_delta, status=status))
+    return comparisons
+
+
+@router.get("/runs/compare", response_model=RegressionCompareResponse)
+async def compare_runs(
+    run_a: int = Query(..., description="Baseline run id (e.g. Prompt A)."),
+    run_b: int = Query(..., description="Candidate run id (e.g. Prompt B)."),
+    db: AsyncSession = Depends(get_db),
+) -> RegressionCompareResponse:
+    """Compares two persisted runs case-by-case, for the A/B Comparison view.
+
+    Args:
+        run_a (int): Baseline run id.
+        run_b (int): Candidate run id.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        RegressionCompareResponse: Both runs in full, a per-case diff, and the
+            headline metric deltas (``run_b`` minus ``run_a``).
+
+    Raises:
+        HTTPException: 404 if either run id doesn't exist.
+    """
+    row_a, row_b = await _get_run_or_404(run_a, db), await _get_run_or_404(run_b, db)
+    return RegressionCompareResponse(
+        run_a=RegressionRunDetail.from_run(row_a),
+        run_b=RegressionRunDetail.from_run(row_b),
+        cases=_diff_cases(row_a.results, row_b.results),
+        summary_delta={
+            "average_score": round(row_b.average_score - row_a.average_score, 2),
+            "scored_average_score": round(row_b.scored_average_score - row_a.scored_average_score, 2),
+            "coverage": round(row_b.coverage - row_a.coverage, 2),
+            "passed": row_b.passed - row_a.passed,
+        },
+    )
+
+
+@router.get("/runs/{run_id}", response_model=RegressionRunDetail)
+async def get_run(run_id: int, db: AsyncSession = Depends(get_db)) -> RegressionRunDetail:
+    """Returns one persisted run in full, including its per-case results.
+
+    Args:
+        run_id (int): The run's id.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        RegressionRunDetail: The stored run, shaped like the live report.
+
+    Raises:
+        HTTPException: 404 if no such run exists.
+    """
+    return RegressionRunDetail.from_run(await _get_run_or_404(run_id, db))
+
+
+@router.delete("/runs/{run_id}", response_model=RegressionRunDeleteResult)
+async def delete_run(run_id: int, db: AsyncSession = Depends(get_db)) -> RegressionRunDeleteResult:
+    """Removes one run from the history (e.g. a throwaway/misconfigured run).
+
+    Args:
+        run_id (int): The run's id.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        RegressionRunDeleteResult: Always ``{"success": true}`` on success.
+
+    Raises:
+        HTTPException: 404 if no such run exists.
+    """
+    await db.delete(await _get_run_or_404(run_id, db))
+    await db.commit()
+    return RegressionRunDeleteResult(success=True)
 
 
 # ---------------------------------------------------------------------------
