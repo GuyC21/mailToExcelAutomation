@@ -100,7 +100,7 @@ async def sync_pending(db: AsyncSession) -> dict:
         return {"synced": [], "pending": 0, "error": None}
     records = [to_excel_record(row) for row in pending]
     try:
-        await asyncio.to_thread(get_excel_repository().append_records, records)
+        await asyncio.to_thread(get_excel_repository().upsert_records, records)
     except ExcelLockedError as error:
         logger.warning("Excel sync postponed: %s", error)
         return {"synced": [], "pending": len(pending), "error": str(error)}

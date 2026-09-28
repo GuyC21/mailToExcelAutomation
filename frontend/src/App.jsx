@@ -6,6 +6,7 @@ import SandboxPage from './pages/SandboxPage';
 import DashboardPage from './pages/DashboardPage';
 import RegressionPage from './pages/RegressionPage';
 import LabelingPage from './pages/LabelingPage';
+import ReviewPage from './pages/ReviewPage';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/prompts" element={<HomePage />} />
           <Route path="/sandbox" element={<SandboxPage />} />
+          <Route path="/review" element={<ReviewPage />} />
           <Route path="/regression" element={<RegressionPage />} />
           <Route path="/labeling" element={<LabelingPage />} />
         </Routes>

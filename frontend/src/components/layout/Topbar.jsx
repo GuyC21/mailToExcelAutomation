@@ -5,6 +5,7 @@ const navItems = [
   { id: 'dashboard', path: '/dashboard', label: 'דאשבורד פיננסי' },
   { id: 'prompts', path: '/prompts', label: 'ניהול פרומפטים' },
   { id: 'sandbox', path: '/sandbox', label: 'טסטר חילוץ' },
+  { id: 'review', path: '/review', label: 'בקרת חשבוניות' },
   { id: 'regression', path: '/regression', label: 'בדיקות רגרסיה' },
   { id: 'labeling', path: '/labeling', label: 'תיוג מסמכים' },
 ];

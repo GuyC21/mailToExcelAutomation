@@ -75,8 +75,8 @@ class ExcelRepository:
         return workbook
 
     # ---- writes ----------------------------------------------------------
-    def append_records(self, records: List[dict]) -> List[int]:
-        """Appends documents (+ their lines); skips ids already present.
+    def upsert_records(self, records: List[dict]) -> List[int]:
+        """Inserts or updates documents (+ their lines).
 
         Returns:
             The ingestion ids now present in the workbook.
@@ -84,19 +84,78 @@ class ExcelRepository:
         with self._lock:
             workbook = load_workbook(self.file_path)
             documents, lines = workbook[DOCUMENTS_SHEET], workbook[LINES_SHEET]
-            existing = {row[0] for row in documents.iter_rows(min_row=2, max_col=1, values_only=True)}
+            
+            # Map existing document rows: {ingestion_id: row_index (1-based)}
+            doc_rows = {row[0]: idx for idx, row in enumerate(documents.iter_rows(min_row=2, max_col=1, values_only=True), start=2)}
+            
             for record in records:
-                if record["ingestion_id"] in existing:
-                    continue  # Idempotent: a retry after a partial failure never duplicates rows.
-                self._append_row(documents, DOCUMENT_COLUMNS, record)
-                status_cell = documents.cell(row=documents.max_row, column=_STATUS_COL)
-                status_cell.fill = PatternFill("solid", fgColor=STATUS_FILLS.get(record["status"], "FFFFFF"))
-                for line in (record.get("data") or {}).get("line_items") or []:
-                    self._append_row(lines, LINE_COLUMNS, {"record": record, "line": line})
+                ingestion_id = record["ingestion_id"]
+                if ingestion_id in doc_rows:
+                    # Update existing document row
+                    doc_row_idx = doc_rows[ingestion_id]
+                    for col_idx, column in enumerate(DOCUMENT_COLUMNS, start=1):
+                        cell = documents.cell(row=doc_row_idx, column=col_idx)
+                        cell.value = column.value(record)
+                        
+                    status_cell = documents.cell(row=doc_row_idx, column=_STATUS_COL)
+                    status_cell.fill = PatternFill("solid", fgColor=STATUS_FILLS.get(record["status"], "FFFFFF"))
+                    
+                    # Delete existing line items for this record
+                    # Collect from bottom to top to avoid shifting indices
+                    lines_to_delete = []
+                    for idx, row in enumerate(lines.iter_rows(min_row=2, max_col=1, values_only=True), start=2):
+                        if row[0] == ingestion_id:
+                            lines_to_delete.append(idx)
+                    
+                    for idx in reversed(lines_to_delete):
+                        lines.delete_rows(idx)
+                        
+                    # Re-append line items
+                    for line in (record.get("data") or {}).get("line_items") or []:
+                        self._append_row(lines, LINE_COLUMNS, {"record": record, "line": line})
+                else:
+                    self._append_row(documents, DOCUMENT_COLUMNS, record)
+                    status_cell = documents.cell(row=documents.max_row, column=_STATUS_COL)
+                    status_cell.fill = PatternFill("solid", fgColor=STATUS_FILLS.get(record["status"], "FFFFFF"))
+                    for line in (record.get("data") or {}).get("line_items") or []:
+                        self._append_row(lines, LINE_COLUMNS, {"record": record, "line": line})
             for sheet in (documents, lines):
                 sheet.auto_filter.ref = sheet.dimensions
             self._save(workbook)
             return [r["ingestion_id"] for r in records]
+
+    def delete_record(self, ingestion_id: int) -> bool:
+        """Deletes a document and its lines from the workbook.
+
+        Returns:
+            True if deleted, False if not found.
+        """
+        with self._lock:
+            workbook = load_workbook(self.file_path)
+            documents, lines = workbook[DOCUMENTS_SHEET], workbook[LINES_SHEET]
+            
+            # Find document row
+            doc_row_idx = None
+            for idx, row in enumerate(documents.iter_rows(min_row=2, max_col=1, values_only=True), start=2):
+                if row[0] == ingestion_id:
+                    doc_row_idx = idx
+                    break
+                    
+            if doc_row_idx is not None:
+                documents.delete_rows(doc_row_idx)
+                
+                lines_to_delete = []
+                for idx, row in enumerate(lines.iter_rows(min_row=2, max_col=1, values_only=True), start=2):
+                    if row[0] == ingestion_id:
+                        lines_to_delete.append(idx)
+                
+                for idx in reversed(lines_to_delete):
+                    lines.delete_rows(idx)
+                    
+                self._save(workbook)
+                return True
+                
+            return False
 
     @staticmethod
     def _append_row(sheet, columns: Iterable[Column], source: dict) -> None:

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import models.ingestion  # noqa: F401  (registers tables with Base.metadata)
 import models.prompt  # noqa: F401
 import models.regression  # noqa: F401
-from api.routes import email, excel, ingestion, prompts, regression, dashboard
+from api.routes import email, excel, ingestion, prompts, regression, dashboard, documents
 from database import Base, async_session, engine
 from services.excel_sync import get_excel_repository, sync_pending
 from services.ingestion_pipeline import get_extractor
@@ -50,6 +50,7 @@ app.include_router(email.router, prefix="/api/email", tags=["Inbound email"])
 app.include_router(excel.router, prefix="/api/excel", tags=["Excel source of truth"])
 app.include_router(regression.router, prefix="/api/regression", tags=["Regression Testing"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
+app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 
 
 @app.get("/")
