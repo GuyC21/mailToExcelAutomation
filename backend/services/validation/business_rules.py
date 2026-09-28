@@ -101,7 +101,20 @@ def _check_totals(doc: DocumentExtraction, default_vat_rate: float, tolerance: f
 
 def validate_document(doc: DocumentExtraction, default_vat_rate: float = 18.0,
                       tolerance: float = 1.0) -> List[ValidationIssue]:
-    """Runs all business rules and returns the findings (empty = clean)."""
+    """Runs all business rules and returns the findings (empty = clean).
+
+    Centralizes all deterministic validation rules. We separate the extraction 
+    (LLM transcription) from validation (arithmetic checks) to prevent the LLM 
+    from silently correcting supplier mistakes and masking real issues.
+
+    Args:
+        doc (DocumentExtraction): The extracted document data to validate.
+        default_vat_rate (float): The default VAT percentage to apply if missing.
+        tolerance (float): Allowed difference in arithmetic checks (e.g. for rounding).
+
+    Returns:
+        List[ValidationIssue]: A list of identified validation issues, if any.
+    """
     issues = _check_required(doc) + _check_lines(doc, tolerance) + _check_totals(doc, default_vat_rate, tolerance)
     issues += [ValidationIssue("EXTRACTION_NOTE", WARNING, note) for note in doc.extraction_notes]
     return issues

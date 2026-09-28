@@ -27,17 +27,17 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 # ---------------------------------------------------------------------------
 # Field taxonomy — which comparison strategy applies to each field, and how
 # much it should count toward its sub-score.
 # ---------------------------------------------------------------------------
 
-_DATE_FIELDS = {"document_date", "billing_period_start", "billing_period_end", "due_date", "service_date"}
-_AMOUNT_FIELDS = {"subtotal", "vat_amount", "total_amount", "quantity", "unit_price", "line_total"}
-_PERCENT_FIELDS = {"vat_rate"}
-_IGNORED_FIELDS = {"line_items", "extraction_notes", "line_number"}
+_DATE_FIELDS: Set[str] = {"document_date", "billing_period_start", "billing_period_end", "due_date", "service_date"}
+_AMOUNT_FIELDS: Set[str] = {"subtotal", "vat_amount", "total_amount", "quantity", "unit_price", "line_total"}
+_PERCENT_FIELDS: Set[str] = {"vat_rate"}
+_IGNORED_FIELDS: Set[str] = {"line_items", "extraction_notes", "line_number"}
 
 DEFAULT_FIELD_WEIGHTS: Dict[str, float] = {
     "supplier_name": 3.0,
@@ -95,6 +95,7 @@ class FieldResult:
     method: str  # "fuzzy" | "tolerance" | "date"
 
     def to_dict(self) -> dict:
+        """Serializes the result to a dictionary."""
         return {
             "field": self.field,
             "expected": self.expected,
@@ -116,6 +117,7 @@ class LineItemComparison:
     fields: List[FieldResult] = field(default_factory=list)
 
     def to_dict(self) -> dict:
+        """Serializes the comparison to a dictionary."""
         return {
             "status": self.status,
             "expected_index": self.expected_index,
@@ -137,21 +139,26 @@ class ScoreReport:
 
     @property
     def matched_line_items(self) -> int:
+        """Count of successfully matched line items."""
         return sum(1 for c in self.line_item_comparisons if c.status == "matched")
 
     @property
     def missing_line_items(self) -> int:
+        """Count of line items present in ground truth but missing from extraction."""
         return sum(1 for c in self.line_item_comparisons if c.status == "missing")
 
     @property
     def extra_line_items(self) -> int:
+        """Count of line items extracted but not present in ground truth."""
         return sum(1 for c in self.line_item_comparisons if c.status == "extra")
 
     @property
     def mismatched_fields(self) -> List[str]:
+        """Names of header fields that failed to match ground truth."""
         return [f.field for f in self.field_results if not f.matched]
 
     def to_dict(self) -> dict:
+        """Serializes the full report to a dictionary."""
         return {
             "overall_score": round(self.overall_score, 2),
             "header_score": round(self.header_score, 2),
@@ -172,7 +179,18 @@ class ScoreReport:
 # ---------------------------------------------------------------------------
 
 def levenshtein_distance(a: str, b: str) -> int:
-    """Classic edit distance, O(len(a)*len(b)) time, O(min(len(a),len(b))) memory."""
+    """Classic edit distance, O(len(a)*len(b)) time, O(min(len(a),len(b))) memory.
+
+    Calculated dynamically without external libraries to keep the test runner
+    lightweight and dependency-free.
+
+    Args:
+        a: First string.
+        b: Second string.
+
+    Returns:
+        The minimum number of single-character edits required to change 'a' into 'b'.
+    """
     if a == b:
         return 0
     if not a:
@@ -194,13 +212,29 @@ def levenshtein_distance(a: str, b: str) -> int:
 
 
 def _normalise_text(value: Any) -> str:
+    """Normalizes string representations for fuzzy comparison.
+
+    Args:
+        value: The raw input to normalize.
+
+    Returns:
+        A lowercased string with extra spaces removed.
+    """
     if value is None:
         return ""
     return " ".join(str(value).strip().casefold().split())
 
 
 def text_similarity(expected: Any, actual: Any) -> float:
-    """Normalised Levenshtein similarity in [0, 1]; both-empty is a perfect match."""
+    """Normalised Levenshtein similarity in [0, 1]; both-empty is a perfect match.
+
+    Args:
+        expected: Ground truth value.
+        actual: Extracted value.
+
+    Returns:
+        Similarity score between 0.0 (completely different) and 1.0 (identical).
+    """
     a, b = _normalise_text(expected), _normalise_text(actual)
     if not a and not b:
         return 1.0
@@ -214,6 +248,7 @@ def text_similarity(expected: Any, actual: Any) -> float:
 # ---------------------------------------------------------------------------
 
 def _as_float(value: Any) -> Optional[float]:
+    """Safely converts a value to a float, ignoring booleans."""
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -228,6 +263,15 @@ def amount_similarity(expected: Any, actual: Any, abs_tolerance: float, rel_tole
     The band is ``max(abs_tolerance, rel_tolerance * |expected|)`` so a tiny
     rounding difference on a large invoice total doesn't fail the same way a
     tiny amount would with a fixed absolute tolerance.
+
+    Args:
+        expected: Ground truth numeric value.
+        actual: Extracted numeric value.
+        abs_tolerance: Maximum absolute difference allowed.
+        rel_tolerance: Maximum relative difference allowed (as a fraction of expected).
+
+    Returns:
+        A score between 0.0 and 1.0.
     """
     a, b = _as_float(expected), _as_float(actual)
     if a is None and b is None:
@@ -244,7 +288,15 @@ def amount_similarity(expected: Any, actual: Any, abs_tolerance: float, rel_tole
 
 
 def date_similarity(expected: Any, actual: Any) -> float:
-    """Dates are ISO-normalised upstream, so this is an exact-match check."""
+    """Dates are ISO-normalised upstream, so this is an exact-match check.
+
+    Args:
+        expected: Ground truth date string.
+        actual: Extracted date string.
+
+    Returns:
+        1.0 if identical, 0.0 otherwise.
+    """
     a = str(expected).strip() if expected not in (None, "") else None
     b = str(actual).strip() if actual not in (None, "") else None
     if a is None and b is None:
@@ -253,6 +305,17 @@ def date_similarity(expected: Any, actual: Any) -> float:
 
 
 def _compare_field(name: str, expected: Any, actual: Any, config: ScoringConfig) -> FieldResult:
+    """Dispatches the field to the appropriate comparison strategy based on its type.
+
+    Args:
+        name: The field key.
+        expected: The ground truth value.
+        actual: The extracted value.
+        config: The active ScoringConfig.
+
+    Returns:
+        The calculated FieldResult.
+    """
     if name in _AMOUNT_FIELDS:
         score = amount_similarity(expected, actual, config.amount_abs_tolerance, config.amount_rel_tolerance)
         method = "tolerance"
@@ -274,6 +337,16 @@ def _compare_field(name: str, expected: Any, actual: Any, config: ScoringConfig)
 # ---------------------------------------------------------------------------
 
 def _score_header(expected: dict, actual: dict, config: ScoringConfig) -> Tuple[float, List[FieldResult]]:
+    """Calculates the weighted score for all header (non-line-item) fields.
+
+    Args:
+        expected: The ground truth document dictionary.
+        actual: The extracted document dictionary.
+        config: The active ScoringConfig.
+
+    Returns:
+        A tuple of the (weighted average score, list of individual field results).
+    """
     weights = dict(config.field_weights)
     # Any field present in either payload but not in the weight table still
     # counts (default weight 1.0), so an unexpected schema addition is never
@@ -301,6 +374,16 @@ def _score_header(expected: dict, actual: dict, config: ScoringConfig) -> Tuple[
 
 def _line_item_similarity(expected_item: dict, actual_item: dict,
                           config: ScoringConfig) -> Tuple[float, List[FieldResult]]:
+    """Calculates the weighted similarity between a single pair of line items.
+
+    Args:
+        expected_item: A line item dict from the ground truth.
+        actual_item: A line item dict from the extraction.
+        config: The active ScoringConfig.
+
+    Returns:
+        A tuple of the (weighted average score, list of field results).
+    """
     field_names = (set(config.line_field_weights) | set(expected_item) | set(actual_item)) - _IGNORED_FIELDS
     results: List[FieldResult] = []
     weighted_sum = 0.0
@@ -317,6 +400,20 @@ def _line_item_similarity(expected_item: dict, actual_item: dict,
 
 def _match_line_items(expected_items: List[dict], actual_items: List[dict],
                       config: ScoringConfig) -> Tuple[float, List[LineItemComparison]]:
+    """Aligns expected and actual line items using a greedy matching algorithm.
+
+    This avoids the complexity of full bipartite matching (Hungarian algorithm)
+    while being more than accurate enough for the short line item lists typical
+    of settlement forms. Unmatched items are penalized as missing/extra.
+
+    Args:
+        expected_items: The ground truth list of line items.
+        actual_items: The extracted list of line items.
+        config: The active ScoringConfig.
+
+    Returns:
+        A tuple of the (overall line items score, list of line item comparisons).
+    """
     n_expected, n_actual = len(expected_items), len(actual_items)
     if n_expected == 0 and n_actual == 0:
         return 1.0, []
@@ -371,6 +468,14 @@ def score_extraction(expected: Dict[str, Any], actual: Dict[str, Any],
     Both arguments are plain dicts shaped like ``schemas.extraction.DocumentExtraction``
     (e.g. from ``.model_dump()`` or a hand-written ``expected.json``). Returns a
     0-100 ``overall_score`` plus a full field-by-field / line-by-line breakdown.
+    
+    Args:
+        expected: Ground truth dictionary.
+        actual: The extracted dictionary.
+        config: The active ScoringConfig (uses default if None).
+
+    Returns:
+        A complete ScoreReport with detailed breakdowns.
     """
     config = config or ScoringConfig()
     expected = expected or {}
@@ -393,7 +498,16 @@ def score_extraction(expected: Dict[str, Any], actual: Dict[str, Any],
 
 def score_files(expected_path: Path | str, actual_path: Path | str,
                config: Optional[ScoringConfig] = None) -> ScoreReport:
-    """Convenience wrapper: loads two JSON files from disk and scores them."""
+    """Convenience wrapper: loads two JSON files from disk and scores them.
+
+    Args:
+        expected_path: Path to the expected JSON file.
+        actual_path: Path to the actual JSON file.
+        config: The active ScoringConfig.
+
+    Returns:
+        A complete ScoreReport.
+    """
     expected = json.loads(Path(expected_path).read_text(encoding="utf-8"))
     actual = json.loads(Path(actual_path).read_text(encoding="utf-8"))
     return score_extraction(expected, actual, config)

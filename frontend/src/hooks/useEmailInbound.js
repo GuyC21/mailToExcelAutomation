@@ -2,10 +2,21 @@ import { useState } from 'react';
 import { apiRequest } from '../api/client';
 
 /**
- * Simulates an email arriving at the GoldenCare inbox.
- * Two ways in: a composed email (multipart webhook) or a raw .eml file.
- * @returns {{isSending: boolean, response: object|null, error: string|null,
- *   sendComposedEmail: Function, sendEmlFile: Function, reset: Function}}
+ * Hook: useEmailInbound
+ * 
+ * Handles the simulation of incoming emails for the GoldenCare backoffice.
+ * This abstracts away the complexity of building multipart form data for 
+ * either manually composed emails or raw .eml files. By keeping this here,
+ * the Sandbox UI components only need to deal with the presentation of results.
+ * 
+ * @returns {{
+ *   isSending: boolean,     // True while the email payload is being sent and processed
+ *   response: object|null,  // The parsed email and extraction results returned by the server
+ *   error: string|null,     // Error message if the operation fails
+ *   sendComposedEmail: (email: {from: string, to: string, subject: string, text: string, files: File[]}) => Promise<object|null>, 
+ *   sendEmlFile: (file: File) => Promise<object|null>, // Sends a raw RFC 822 .eml file
+ *   reset: () => void       // Clears the current response and error state
+ * }}
  */
 export function useEmailInbound() {
   const [isSending, setIsSending] = useState(false);

@@ -4,6 +4,17 @@ import { Play, AlertTriangle, FileText } from 'lucide-react';
 import CaseCard from '../components/regression/CaseCard';
 import ScoreGauge from '../components/regression/ScoreGauge';
 
+/**
+ * RegressionPage Component
+ * 
+ * Provides a user interface for running and viewing algorithmic regression tests.
+ * This page connects to the backend regression suite via the `useRegression` hook,
+ * allowing developers to verify that recent changes haven't degraded extraction
+ * accuracy against a known set of ground-truth documents.
+ * 
+ * @component
+ * @returns {JSX.Element} The rendered Regression page.
+ */
 export default function RegressionPage() {
   const { report, loading, error, runSuite } = useRegression();
 

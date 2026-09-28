@@ -40,7 +40,21 @@ def _ensure_identity(payload: InboundEmailPayload) -> InboundEmailPayload:
 
 
 def parse_eml(raw: bytes) -> InboundEmailPayload:
-    """Parses a raw MIME message, decoding RFC 2047 Hebrew subjects/filenames."""
+    """Parses a raw MIME message, decoding RFC 2047 Hebrew subjects/filenames.
+
+    Handles native EML formats usually forwarded directly from mailboxes.
+    Decodes potentially complex multi-part structures and properly extracts 
+    base64/quoted-printable components.
+
+    Args:
+        raw (bytes): The raw bytes of the EML message.
+
+    Returns:
+        InboundEmailPayload: A standardized payload representation of the email.
+
+    Raises:
+        EmailParseError: If the message cannot be parsed or lacks MIME format.
+    """
     try:
         message = BytesParser(policy=policy.default).parsebytes(raw)
     except Exception as error:

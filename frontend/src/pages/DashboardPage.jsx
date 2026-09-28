@@ -5,6 +5,19 @@ import { TrendingUp, FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
 
+/**
+ * DashboardPage Component
+ * 
+ * Renders the main financial dashboard, providing a high-level overview of system 
+ * performance and invoice processing metrics. It uses the `useDashboard` hook to 
+ * fetch aggregated statistics.
+ * 
+ * The visual breakdown (KPIs, pie charts for status, bar charts for top suppliers) 
+ * helps business users quickly identify bottlenecks or anomalies in the ingestion pipeline.
+ * 
+ * @component
+ * @returns {JSX.Element} The rendered Dashboard page.
+ */
 export default function DashboardPage() {
   const { stats, loading, error, refresh } = useDashboard();
 

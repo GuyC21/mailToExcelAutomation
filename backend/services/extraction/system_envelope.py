@@ -70,6 +70,9 @@ You receive ONE supplier settlement form / invoice (usually in Hebrew, right-to-
 def build_system_envelope(business_prompt: str) -> str:
     """Wraps a business prompt with the technical extraction envelope.
 
+    This function interpolates the user-defined business prompt into a larger
+    prompt template that enforces strict structural and semantic guidelines for the AI.
+
     Args:
         business_prompt: The active prompt text authored in the Backoffice.
 

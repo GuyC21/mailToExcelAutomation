@@ -36,8 +36,24 @@ async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, ch
                           email: Optional[InboundEmail] = None) -> IngestionResult:
     """Processes one document and records the outcome, whatever it is.
 
+    This function represents the core ingestion flow. It extracts data from the document
+    using the currently active LLM prompt, applies business validations to the extracted
+    data, stores the record in the database, and attempts to sync it to Excel. It is 
+    designed to ensure that even failed extractions are recorded for audit purposes.
+
+    Args:
+        db (AsyncSession): The database session.
+        filename (str): The name of the uploaded or emailed file.
+        content (bytes): The raw file bytes.
+        channel (str): The ingestion source channel (e.g., "webhook", "email").
+        email (Optional[InboundEmail]): The associated email record, if ingested via email.
+
+    Returns:
+        IngestionResult: The result of the ingestion process, including extraction data,
+            validation issues, and Excel sync status.
+
     Raises:
-        UnsupportedDocumentError: The file is not a valid PDF / image.
+        UnsupportedDocumentError: The file is not a valid PDF or image.
         NoActivePromptError: No prompt is active in the Backoffice.
     """
     prompt = await get_active_prompt(db)
@@ -81,8 +97,18 @@ async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, ch
 async def ingest_email(db: AsyncSession, payload: InboundEmailPayload) -> tuple[InboundEmail, List[IngestionResult]]:
     """Persists the email, then ingests every supported attachment.
 
-    Unsupported attachments (signatures, .docx, ...) are reported as SKIPPED so
-    the sender-side view stays complete.
+    This ensures every inbound email is logged before processing its attachments,
+    providing full traceability from the original email to the extracted documents.
+    Unsupported attachments (like signatures or Word documents) are reported as SKIPPED
+    rather than ignored, so the sender-side view stays complete and reflects reality.
+
+    Args:
+        db (AsyncSession): The database session.
+        payload (InboundEmailPayload): The parsed email payload.
+
+    Returns:
+        tuple[InboundEmail, List[IngestionResult]]: The persisted email record and
+            the results for each processed attachment.
     """
     email = InboundEmail(
         source_format=payload.source_format, message_id=payload.message_id, sender=payload.sender,

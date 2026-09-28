@@ -37,14 +37,33 @@ _VALID_DOC = {
 
 
 class MockProvider(ExtractionProvider):
-    """Returns canned JSON after a short simulated latency."""
+    """Returns canned JSON after a short simulated latency.
+    
+    Useful for testing UI loading states and local environment setup without
+    needing real AI provider credentials.
+    """
 
-    name = "mock"
+    name: str = "mock"
 
     def is_configured(self) -> bool:
+        """The mock provider is always considered configured.
+
+        Returns:
+            True, as no external credentials are required.
+        """
         return True
 
     def extract(self, system_prompt: str, file_path: str, mime_type: str) -> ProviderResponse:
+        """Simulates an extraction by returning a fixed JSON document.
+
+        Args:
+            system_prompt: The system instructions (ignored by mock).
+            file_path: Path to the local file to process.
+            mime_type: The MIME type of the file (ignored by mock).
+
+        Returns:
+            A ProviderResponse containing the canned JSON string and the 'mock' model identifier.
+        """
         time.sleep(1.0)  # Lets the UI show its loading state realistically.
         document = json.loads(json.dumps(_VALID_DOC))
         name = os.path.basename(file_path).lower()

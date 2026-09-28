@@ -11,8 +11,16 @@ import { useEmailInbound } from '../hooks/useEmailInbound';
 import { useExcelPreview } from '../hooks/useExcelPreview';
 
 /**
- * Sample Runner – orchestrates the email simulation / direct upload flows and
- * the live Excel view. Holds no business logic; all I/O lives in hooks.
+ * SandboxPage Component
+ * 
+ * Orchestrates the end-to-end sandbox testing environment for data extraction.
+ * This component intentionally holds no direct business logic or API calls; 
+ * instead, it acts as a coordinator between the UI modes (Email vs Direct Upload) 
+ * and delegates all I/O operations to custom hooks (`useIngestion`, `useEmailInbound`, `useExcelPreview`).
+ * This separation ensures the UI remains declarative and easy to test.
+ * 
+ * @component
+ * @returns {JSX.Element} The rendered Sandbox page.
  */
 const SandboxPage = () => {
   const [mode, setMode] = useState('email');

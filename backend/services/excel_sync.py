@@ -28,7 +28,18 @@ def get_excel_repository() -> ExcelRepository:
 
 
 def _local_naive(moment: datetime | None) -> datetime:
-    """Excel cannot store tz-aware datetimes; convert to local wall time."""
+    """Excel cannot store tz-aware datetimes; convert to local wall time.
+
+    By stripping timezone info after converting to the local timezone, we
+    ensure that Excel displays the time exactly as it occurred locally,
+    avoiding UI confusion for end-users who do not expect UTC in spreadsheets.
+
+    Args:
+        moment (datetime | None): The datetime to convert. Defaults to current UTC.
+
+    Returns:
+        datetime: A timezone-naive datetime representing local time.
+    """
     moment = moment or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
@@ -36,7 +47,18 @@ def _local_naive(moment: datetime | None) -> datetime:
 
 
 def to_excel_record(row: DocumentIngestion) -> dict:
-    """Flattens an ingestion (+ its email) into the layout's record shape."""
+    """Flattens an ingestion (+ its email) into the layout's record shape.
+
+    We decouple the database schema from the Excel export format here to
+    allow independent evolution of both. This prepares a flat dictionary
+    that easily maps to Excel columns.
+
+    Args:
+        row (DocumentIngestion): The database ingestion record.
+
+    Returns:
+        dict: A flattened dictionary representing a single Excel row.
+    """
     return {
         "ingestion_id": row.id,
         "ingested_at": _local_naive(row.created_at),
@@ -57,8 +79,18 @@ def to_excel_record(row: DocumentIngestion) -> dict:
 async def sync_pending(db: AsyncSession) -> dict:
     """Writes every not-yet-synced ingestion to Excel, oldest first.
 
+    This function implements a resilient synchronization mechanism. Since Excel files 
+    can be locked by users, it processes pending records in a batch and gracefully 
+    handles locks by keeping records as 'pending' to retry later, ensuring zero data loss.
+
+    Args:
+        db (AsyncSession): The database session.
+
     Returns:
-        ``{"synced": [ids], "pending": n, "error": str | None}``
+        dict: A dictionary containing:
+            - 'synced' (List[int]): IDs of successfully synced records.
+            - 'pending' (int): Number of records remaining unsynced.
+            - 'error' (str | None): Any error message if sync was locked or failed.
     """
     result = await db.execute(
         select(DocumentIngestion).where(DocumentIngestion.excel_synced.is_(False)).order_by(DocumentIngestion.id)

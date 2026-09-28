@@ -39,7 +39,17 @@ class StoredDocument:
 
 
 def safe_filename(filename: Optional[str]) -> str:
-    """Strips directories and unsafe characters; keeps Hebrew letters."""
+    """Strips directories and unsafe characters; keeps Hebrew letters.
+
+    Security measure: Prevents directory traversal attacks and sanitizes 
+    untrusted user input before writing to the filesystem.
+
+    Args:
+        filename (Optional[str]): The original filename provided by the client.
+
+    Returns:
+        str: A sanitized, safe filename string.
+    """
     base = os.path.basename((filename or "").replace("\\", "/")).strip()
     cleaned = _UNSAFE_CHARS.sub("_", base).strip(". ")
     return cleaned[:120] or "document"
@@ -57,8 +67,19 @@ def detect_document_type(filename: str, content: bytes) -> Optional[str]:
 def store_document(filename: str, content: bytes) -> StoredDocument:
     """Validates and saves a document to ``<inbox>/<date>/<uuid>_<name>``.
 
+    We isolate files by date to prevent directories from getting too large and 
+    prepend UUIDs to prevent filename collisions. It verifies mime-type against 
+    magic bytes rather than trusting the client's extension for security.
+
+    Args:
+        filename (str): The untrusted original filename.
+        content (bytes): The raw file data.
+
+    Returns:
+        StoredDocument: Metadata describing the successfully stored document.
+
     Raises:
-        UnsupportedDocumentError: For empty, oversized or unsupported files.
+        UnsupportedDocumentError: For empty, oversized, or unsupported file formats.
     """
     settings = get_settings()
     name = safe_filename(filename)
