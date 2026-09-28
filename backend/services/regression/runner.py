@@ -16,9 +16,16 @@ document extension mimetypes understands works (pdf, png, jpg, ...).
 The pipeline itself (system envelope, JSON parsing, schema validation) is
 reused from ``services.extraction.extractor.DocumentExtractor`` rather than
 re-implemented here, so a regression run exercises exactly the same code path
-production ingestion does. Only the provider list is pinned to Gemini
-(``GeminiProvider``) per the Sprint 3 spec: regression is about tracking one
-model's accuracy over time, not about whichever provider happened to answer.
+production ingestion does, with the *prompt under evaluation* (the active one
+by default, or any stored version - that is how a prompt change is checked
+before it is activated). The provider is pinned to a single one - Gemini per
+the Sprint 3 spec, OpenAI only when Gemini is not configured - so two runs
+compare prompts, not whichever provider happened to answer. The report
+records the prompt, provider and model actually used.
+
+A case passes only if its score reaches the threshold AND no critical field
+(total, supplier tax id, document number, currency) is wrong. Headline
+accuracy counts failed extractions as 0 and is reported next to coverage.
 
 The extractor is injected (``RegressionRunner.__init__``), so tests can pass
 a stub provider and never touch the network — see ``test_runner.py``.
@@ -38,14 +45,14 @@ from typing import List, Optional, Tuple, Union
 from config import get_settings
 from services.extraction.extractor import DocumentExtractor
 from services.extraction.providers.gemini_provider import GeminiProvider
+from services.extraction.providers.openai_provider import OpenAIProvider
 from services.regression.scorer import ScoreReport, ScoringConfig, score_extraction
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_PASS_THRESHOLD = 80.0
-# A neutral business prompt: regression measures the *technical* pipeline's
-# transcription accuracy, so it deliberately does not depend on whatever the
-# finance team currently has active in the Backoffice.
+# Fallback prompt for the CLI and tests only; the API always evaluates a
+# stored prompt version (the active one unless another is selected).
 DEFAULT_BUSINESS_PROMPT = (
     "חלץ את כל הנתונים מהמסמך המצורף בנאמנות מלאה למקור, ללא תיקון או חישוב מחדש."
 )
@@ -112,6 +119,10 @@ def discover_cases(suite_dir: Union[Path, str]) -> Tuple[List[SuiteCase], List[s
     return cases, warnings
 
 
+class RegressionProviderUnavailableError(RuntimeError):
+    """No real AI provider is configured; a regression run would be meaningless."""
+
+
 @dataclass
 class TestCaseResult:
     """Outcome of running (and scoring) one suite case."""
@@ -134,6 +145,7 @@ class TestCaseResult:
             "provider": self.provider,
             "model": self.model,
             "error": self.error,
+            "critical_failures": list(self.score.critical_failures) if self.score else [],
             "score": self.score.to_dict() if self.score else None,
         }
 
@@ -147,6 +159,7 @@ class RegressionReport:
     pass_threshold: float
     results: List[TestCaseResult] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    prompt: Optional[dict] = None  # {"id", "name"} of the prompt under evaluation
 
     @property
     def total(self) -> int:
@@ -161,20 +174,57 @@ class RegressionReport:
         return self.total - self.passed
 
     @property
+    def scored(self) -> int:
+        """Cases that produced an extraction to score."""
+        return sum(1 for r in self.results if r.score)
+
+    @property
+    def coverage(self) -> float:
+        """Percent of cases that produced a scorable extraction (0-100)."""
+        return 100.0 * self.scored / self.total if self.total else 0.0
+
+    @property
     def average_score(self) -> float:
+        """Mean over ALL cases; a case with no extraction counts as 0.
+
+        This is the headline accuracy: a prompt that stops producing output
+        for hard documents must not look better than one that tries.
+        """
+        if not self.total:
+            return 0.0
+        return sum(r.score.overall_score for r in self.results if r.score) / self.total
+
+    @property
+    def scored_average_score(self) -> float:
+        """Mean over scored cases only (conditional accuracy - read with coverage)."""
         scored = [r.score.overall_score for r in self.results if r.score]
         return sum(scored) / len(scored) if scored else 0.0
+
+    @property
+    def providers(self) -> List[str]:
+        """Distinct provider/model pairs that actually answered."""
+        seen = []
+        for r in self.results:
+            label = "/".join(x for x in (r.provider, r.model) if x)
+            if label and label not in seen:
+                seen.append(label)
+        return seen
 
     def to_dict(self) -> dict:
         return {
             "suite_dir": self.suite_dir,
             "generated_at": self.generated_at,
             "pass_threshold": self.pass_threshold,
+            "prompt": self.prompt,
+            "providers": self.providers,
             "summary": {
                 "total": self.total,
                 "passed": self.passed,
                 "failed": self.failed,
+                "scored": self.scored,
+                "coverage": round(self.coverage, 2),
                 "average_score": round(self.average_score, 2),
+                "scored_average_score": round(self.scored_average_score, 2),
             },
             "warnings": self.warnings,
             "results": [r.to_dict() for r in self.results],
@@ -191,19 +241,30 @@ class RegressionRunner:
 
     def __init__(self, extractor: DocumentExtractor, business_prompt: str = DEFAULT_BUSINESS_PROMPT,
                 scoring_config: Optional[ScoringConfig] = None,
-                pass_threshold: float = DEFAULT_PASS_THRESHOLD):
+                pass_threshold: float = DEFAULT_PASS_THRESHOLD,
+                prompt_info: Optional[dict] = None):
         self._extractor = extractor
         self._business_prompt = business_prompt
         self._scoring_config = scoring_config or ScoringConfig()
         self._pass_threshold = pass_threshold
+        self._prompt_info = prompt_info
 
     @classmethod
     def from_settings(cls, **kwargs) -> "RegressionRunner":
-        """Builds a runner wired to the real ``GeminiProvider`` only."""
+        """Builds a runner pinned to ONE real provider: Gemini, else OpenAI.
+
+        Raises:
+            RegressionProviderUnavailableError: Neither provider has credentials
+                (the offline mock would make every score meaningless).
+        """
         settings = get_settings()
-        provider = GeminiProvider(settings.gemini_api_key, settings.gemini_model_chain)
-        extractor = DocumentExtractor([provider])
-        return cls(extractor, **kwargs)
+        candidates = [GeminiProvider(settings.gemini_api_key, settings.gemini_model_chain),
+                      OpenAIProvider(settings.openai_api_key, settings.openai_model)]
+        provider = next((p for p in candidates if p.is_configured()), None)
+        if provider is None:
+            raise RegressionProviderUnavailableError(
+                "בדיקות רגרסיה דורשות ספק AI אמיתי – יש להגדיר GEMINI_API_KEY או OPENAI_API_KEY")
+        return cls(DocumentExtractor([provider]), **kwargs)
 
     async def run(self, suite_dir: Optional[Union[Path, str]] = None) -> RegressionReport:
         """Runs every case in ``suite_dir`` (default: ``default_suite_dir()``) and
@@ -215,6 +276,7 @@ class RegressionRunner:
             generated_at=datetime.now(timezone.utc).isoformat(),
             pass_threshold=self._pass_threshold,
             warnings=warnings,
+            prompt=self._prompt_info,
         )
         for case in cases:
             report.results.append(await self._run_case(case))
@@ -237,9 +299,9 @@ class RegressionRunner:
 
         actual = outcome.data.model_dump()
         score = score_extraction(expected, actual, self._scoring_config)
+        passed = score.overall_score >= self._pass_threshold and not score.critical_failures
         return TestCaseResult(case.name, str(case.document_path), str(case.expected_path),
-                              passed=score.overall_score >= self._pass_threshold,
-                              provider=outcome.provider, model=outcome.model, score=score)
+                              passed=passed, provider=outcome.provider, model=outcome.model, score=score)
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +319,11 @@ def _parse_args() -> argparse.Namespace:
 async def _main() -> int:
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
-    runner = RegressionRunner.from_settings(pass_threshold=args.threshold)
+    try:
+        runner = RegressionRunner.from_settings(pass_threshold=args.threshold)
+    except RegressionProviderUnavailableError as error:
+        print(error)
+        return 2
     report = await runner.run(args.suite_dir)
     payload = json.dumps(report.to_dict(), ensure_ascii=False, indent=2)
     print(payload)

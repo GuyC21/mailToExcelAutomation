@@ -4,17 +4,29 @@ Every ingestion is first committed to the DB with ``excel_synced = False`` and
 then pushed to Excel. If Excel is locked, the rows simply stay pending and are
 flushed on the next ingestion, on startup, or via ``POST /api/excel/sync`` – a
 temporary Excel problem can never lose a document.
+
+The workbook is a projection of the database. Before every sync the workbook
+is checked against the database identity (see ``ExcelRepository``): if it is
+missing, was archived for an outdated layout, or belongs to another database
+(e.g. a fresh clone next to a workbook with old ids), a new workbook is
+created and *every* ingestion is replayed into it – not just the pending ones.
 """
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from functools import lru_cache
+from typing import Optional
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from config import get_settings
+from database import async_session
+from models.app_metadata import AppMetadata
 from models.ingestion import DocumentIngestion
 from repositories.excel_repository import ExcelLockedError, ExcelRepository
 
@@ -76,6 +88,56 @@ def to_excel_record(row: DocumentIngestion) -> dict:
     }
 
 
+_IDENTITY_KEY = "database_identity"
+_identity_cache: Optional[str] = None
+
+
+async def get_database_identity() -> str:
+    """Returns this database's identity token, creating it on first use.
+
+    Uses its own short-lived session so a creation race (rollback) can never
+    expire objects held by the caller's session.
+    """
+    global _identity_cache
+    if _identity_cache:
+        return _identity_cache
+    async with async_session() as session:
+        row = await session.get(AppMetadata, _IDENTITY_KEY)
+        if row is None:
+            session.add(AppMetadata(key=_IDENTITY_KEY, value=uuid.uuid4().hex))
+            try:
+                await session.commit()
+            except IntegrityError:  # another worker created it first
+                await session.rollback()
+            row = await session.get(AppMetadata, _IDENTITY_KEY)
+        _identity_cache = row.value
+    return _identity_cache
+
+
+def _bind_workbook(repository: ExcelRepository, identity: str) -> bool:
+    """Makes sure the workbook exists and belongs to this database.
+
+    Returns:
+        True if a new, empty workbook was created and must be repopulated.
+
+    Raises:
+        ExcelLockedError: A foreign/outdated workbook is locked and cannot be archived.
+    """
+    if repository.ensure_workbook(identity):
+        return True
+    if repository.read_identity() != identity:
+        archived = repository.replace_with_new(identity, "orphan")
+        logger.warning("Workbook did not belong to this database; archived to %s and rebuilding", archived)
+        return True
+    return False
+
+
+async def _pending_count(db: AsyncSession) -> int:
+    result = await db.execute(select(func.count()).select_from(DocumentIngestion)
+                              .where(DocumentIngestion.excel_synced.is_(False)))
+    return int(result.scalar() or 0)
+
+
 async def sync_pending(db: AsyncSession) -> dict:
     """Writes every not-yet-synced ingestion to Excel, oldest first.
 
@@ -92,6 +154,19 @@ async def sync_pending(db: AsyncSession) -> dict:
             - 'pending' (int): Number of records remaining unsynced.
             - 'error' (str | None): Any error message if sync was locked or failed.
     """
+    repository = get_excel_repository()
+    identity = await get_database_identity()
+    try:
+        rebuilt = await asyncio.to_thread(_bind_workbook, repository, identity)
+    except ExcelLockedError as error:
+        logger.warning("Excel sync postponed: %s", error)
+        return {"synced": [], "pending": await _pending_count(db), "error": str(error)}
+    if rebuilt:
+        # A new workbook starts empty: replay the whole history, not just
+        # what happened to be pending (the old file was archived, not merged).
+        await db.execute(update(DocumentIngestion).values(excel_synced=False))
+        await db.commit()
+
     result = await db.execute(
         select(DocumentIngestion).where(DocumentIngestion.excel_synced.is_(False)).order_by(DocumentIngestion.id)
     )
@@ -100,10 +175,15 @@ async def sync_pending(db: AsyncSession) -> dict:
         return {"synced": [], "pending": 0, "error": None}
     records = [to_excel_record(row) for row in pending]
     try:
-        await asyncio.to_thread(get_excel_repository().upsert_records, records)
+        await asyncio.to_thread(repository.upsert_records, records)
     except ExcelLockedError as error:
         logger.warning("Excel sync postponed: %s", error)
         return {"synced": [], "pending": len(pending), "error": str(error)}
+    except FileNotFoundError:
+        # Removed between the identity check and the write: the next sync
+        # recreates and replays it.
+        logger.warning("Workbook disappeared during sync; will rebuild on next sync")
+        return {"synced": [], "pending": len(pending), "error": "קובץ האקסל לא נמצא – ייווצר מחדש בסנכרון הבא"}
     for row in pending:
         row.excel_synced = True
     await db.commit()

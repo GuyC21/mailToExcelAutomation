@@ -8,6 +8,8 @@ facilitating testing and prompt engineering without affecting the main inbox.
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.uploads import MB, read_upload_or_413
+from config import get_settings
 from database import get_db
 from schemas.ingestion import IngestionResult
 from services.file_storage import UnsupportedDocumentError
@@ -36,7 +38,7 @@ async def ingest_sample(file: UploadFile = File(...), db: AsyncSession = Depends
         HTTPException: If the document type is unsupported (415) or if there
             is no active prompt (409) available to perform the extraction.
     """
-    content = await file.read()
+    content = await read_upload_or_413(file, get_settings().max_upload_mb * MB)
     try:
         return await ingest_document(db, filename=file.filename or "document", content=content, channel="sandbox")
     except UnsupportedDocumentError as error:

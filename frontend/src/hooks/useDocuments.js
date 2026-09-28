@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { apiRequest, API_URL } from '../api/client';
+import { apiRequest, apiUrl } from '../api/client';
 
 /**
  * Hook to manage document ingestions for the Review page.
@@ -51,7 +51,7 @@ export function useDocuments() {
     }
   };
 
-  const getDocumentUrl = (id) => `${API_URL}/api/documents/${id}/file`;
+  const getDocumentUrl = (id) => apiUrl(`/api/documents/${id}/file`);
 
   return {
     documents,

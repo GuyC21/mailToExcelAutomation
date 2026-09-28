@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react';
  * Preview pane for the document being labeled: a locally chosen file before
  * it's saved (rendered from an object URL) or an already-saved case's
  * document (streamed from the backend). Exactly one of `file`/`url` should
- * be set at a time; `file` takes priority.
- * @param {{file: File|null, url: string|null}} props
+ * be set at a time; `file` takes priority. The saved-case URL has no file
+ * extension, so its type comes from `mimeType` (the case's detected MIME type).
+ * @param {{file: File|null, url: string|null, mimeType?: string|null}} props
  */
-const DocumentPreview = ({ file, url }) => {
+const DocumentPreview = ({ file, url, mimeType = null }) => {
   const [objectUrl, setObjectUrl] = useState(null);
 
   useEffect(() => {
@@ -21,7 +22,9 @@ const DocumentPreview = ({ file, url }) => {
   }, [file]);
 
   const src = objectUrl || url;
-  const isImage = file ? file.type.startsWith('image/') : /\.(png|jpe?g|webp)$/i.test(url || '');
+  const isImage = file
+    ? file.type.startsWith('image/')
+    : (mimeType || '').startsWith('image/') || /\.(png|jpe?g|webp)$/i.test(url || '');
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-100 p-2 h-full">

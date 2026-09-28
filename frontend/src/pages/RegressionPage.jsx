@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useRegression } from '../hooks/useRegression';
 import { Play, AlertTriangle, FileText } from 'lucide-react';
 import CaseCard from '../components/regression/CaseCard';
@@ -16,7 +16,10 @@ import ScoreGauge from '../components/regression/ScoreGauge';
  * @returns {JSX.Element} The rendered Regression page.
  */
 export default function RegressionPage() {
-  const { report, loading, error, runSuite } = useRegression();
+  const { report, loading, error, runSuite, prompts } = useRegression();
+  const [promptId, setPromptId] = useState('');
+  const summary = report?.summary;
+  const results = report?.results || [];
 
   return (
     <div className="w-full space-y-6">
@@ -25,8 +28,23 @@ export default function RegressionPage() {
           <h1 className="text-2xl md:text-3xl font-bold text-blue-900">בדיקות רגרסיה (Regression)</h1>
           <p className="text-gray-500 mt-1">הרצת בדיקות אלגוריתמיות מול Ground Truth</p>
         </div>
+        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+        <select
+          value={promptId}
+          onChange={(e) => setPromptId(e.target.value)}
+          disabled={loading}
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white min-w-0 sm:max-w-xs"
+          aria-label="פרומפט לבדיקה"
+        >
+          <option value="">הפרומפט הפעיל</option>
+          {prompts.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}{p.is_active ? ' (פעיל)' : ''} · #{p.id}
+            </option>
+          ))}
+        </select>
         <button 
-          onClick={runSuite}
+          onClick={() => runSuite(promptId ? Number(promptId) : null)}
           disabled={loading}
           className={`flex items-center gap-2 px-6 py-3 rounded-lg font-bold text-white transition shadow ${
             loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
@@ -44,6 +62,7 @@ export default function RegressionPage() {
             </>
           )}
         </button>
+        </div>
       </header>
 
       {error && (
@@ -53,31 +72,54 @@ export default function RegressionPage() {
         </div>
       )}
 
-      {report && (
+      {report && summary && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white p-3 rounded-lg shadow-sm border border-gray-100 text-sm text-gray-600 flex flex-wrap gap-x-4 gap-y-1">
+            <span>פרומפט: <b className="text-gray-800">{report.prompt?.name || '—'}</b>{report.prompt?.is_active === false && ' (לא פעיל – בדיקה מקדימה)'}</span>
+            {report.providers?.length > 0 && <span>מנוע: {report.providers.join(', ')}</span>}
+            <span>סף מעבר: {report.pass_threshold}%</span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="bg-white p-4 rounded-lg shadow border border-gray-100 text-center">
               <p className="text-sm text-gray-500 font-medium">סה"כ טסטים</p>
-              <p className="text-3xl font-bold text-gray-800 mt-1">{report.total}</p>
+              <p className="text-3xl font-bold text-gray-800 mt-1">{summary.total}</p>
             </div>
             <div className="bg-green-50 p-4 rounded-lg shadow border border-green-100 text-center">
               <p className="text-sm text-green-600 font-medium">עברו</p>
-              <p className="text-3xl font-bold text-green-700 mt-1">{report.passed}</p>
+              <p className="text-3xl font-bold text-green-700 mt-1">{summary.passed}</p>
             </div>
             <div className="bg-red-50 p-4 rounded-lg shadow border border-red-100 text-center">
               <p className="text-sm text-red-600 font-medium">נכשלו</p>
-              <p className="text-3xl font-bold text-red-700 mt-1">{report.failed}</p>
+              <p className="text-3xl font-bold text-red-700 mt-1">{summary.failed}</p>
             </div>
             <div className="bg-blue-50 p-4 rounded-lg shadow border border-blue-100 text-center">
-              <p className="text-sm text-blue-600 font-medium">ממוצע דיוק</p>
-              <ScoreGauge score={report.average_score} />
+              <p className="text-sm text-blue-600 font-medium">דיוק ממוצע (כל המקרים)</p>
+              <ScoreGauge score={summary.average_score} />
+              <p className="text-xs text-gray-500 mt-1">חילוץ שנכשל נספר כ-0</p>
+            </div>
+            <div className="bg-white p-4 rounded-lg shadow border border-gray-100 text-center col-span-2 md:col-span-1">
+              <p className="text-sm text-gray-500 font-medium">כיסוי חילוץ</p>
+              <ScoreGauge score={summary.coverage} />
+              <p className="text-xs text-gray-500 mt-1">
+                {summary.scored}/{summary.total} חולצו · דיוק על המחולצים {Number(summary.scored_average_score).toFixed(1)}%
+              </p>
             </div>
           </div>
 
+          {report.warnings?.length > 0 && (
+            <div className="bg-yellow-50 border border-yellow-100 text-yellow-800 p-3 rounded-lg text-sm space-y-1">
+              {report.warnings.map((warning, idx) => <p key={idx}>{warning}</p>)}
+            </div>
+          )}
+
           <div className="space-y-4">
             <h3 className="text-xl font-bold text-gray-800">פירוט מסמכים</h3>
-            {report.cases.map((testCase, idx) => (
-              <CaseCard key={idx} testCase={testCase} />
+            {results.length === 0 && (
+              <p className="text-sm text-gray-500">חבילת הרגרסיה ריקה – הוסף תיקים במסך התיוג.</p>
+            )}
+            {results.map((testCase) => (
+              <CaseCard key={testCase.name} testCase={testCase} />
             ))}
           </div>
         </div>

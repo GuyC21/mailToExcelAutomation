@@ -4,14 +4,21 @@ from typing import Any, Dict, List
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from database import get_db
 from models.ingestion import DocumentIngestion
+from models.processed_attachment import ProcessedAttachment
+from schemas.extraction import DocumentExtraction
+from services.extraction.providers.base import short_error
+from services.validation.business_rules import STATUS_FAILED, STATUS_NEEDS_REVIEW, STATUS_VALID
 from services.excel_sync import sync_pending, get_excel_repository
 
 router = APIRouter()
+_EDITABLE_STATUSES = {STATUS_VALID, STATUS_NEEDS_REVIEW, STATUS_FAILED}
 
 @router.get("", response_model=List[Dict[str, Any]])
 async def list_documents(status: str = None, limit: int = 50, db: AsyncSession = Depends(get_db)):
@@ -59,9 +66,16 @@ async def update_document(id: int, updates: Dict[str, Any], db: AsyncSession = D
         raise HTTPException(status_code=404, detail="Document not found")
         
     if "extracted_data" in updates:
-        record.extracted_data = updates["extracted_data"]
-    
+        # Same contract as the model's output: numbers normalised, NaN/Infinity
+        # and malformed shapes rejected, so a manual edit can't poison totals.
+        try:
+            record.extracted_data = DocumentExtraction.model_validate(updates["extracted_data"] or {}).model_dump()
+        except ValidationError as error:
+            raise HTTPException(status_code=422, detail=f"מבנה הנתונים אינו תקין: {short_error(error)}") from error
+
     if "status" in updates:
+        if updates["status"] not in _EDITABLE_STATUSES:
+            raise HTTPException(status_code=422, detail=f"סטטוס לא חוקי: {updates['status']}")
         record.status = updates["status"]
         
     record.excel_synced = False
@@ -82,7 +96,9 @@ async def delete_document(id: int, db: AsyncSession = Depends(get_db)):
     if not record:
         raise HTTPException(status_code=404, detail="Document not found")
         
-    # Delete from DB
+    # Delete from DB (and its email idempotency claim, so the same email can
+    # be re-ingested deliberately; SQLite does not enforce the FK cascade).
+    await db.execute(delete(ProcessedAttachment).where(ProcessedAttachment.ingestion_id == id))
     await db.delete(record)
     await db.commit()
     

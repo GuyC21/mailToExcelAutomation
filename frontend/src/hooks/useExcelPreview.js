@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { API_URL, apiRequest } from '../api/client';
+import { apiRequest, apiUrl } from '../api/client';
 
 /**
  * Hook: useExcelPreview
@@ -42,5 +42,5 @@ export function useExcelPreview(limit = 8) {
     return load();
   }, [load]);
 
-  return { preview, isLoading, error, refresh, downloadUrl: `${API_URL}/api/excel/download` };
+  return { preview, isLoading, error, refresh, downloadUrl: apiUrl('/api/excel/download') };
 }

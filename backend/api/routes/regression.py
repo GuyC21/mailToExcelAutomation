@@ -4,20 +4,28 @@ the ground-truth cases it runs against.
 Two concerns live in this router because they share one resource – the suite
 under ``data/regression_suite/`` – and one URL namespace (``/api/regression``):
 
-    * ``POST /run``            – replay the suite through Gemini and score it
-      (``services.regression.runner``).
+    * ``POST /run``            – replay the suite with a chosen prompt version
+      (default: the active one) and score it (``services.regression.runner``).
     * ``GET/POST/DELETE /cases`` – list, create, edit and remove the
       hand-labeled ground-truth cases the suite is made of
       (``services.regression.labeling``). This is the API behind the תיוג
       (labeling) page: without it, growing the suite means a developer
       hand-writing JSON files.
 """
+import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
+from api.uploads import MB, read_upload_or_413
+from config import get_settings
+from database import get_db
+from models.prompt import PromptVersion
+from repositories.prompt_repository import get_active_prompt
 from schemas.extraction import DocumentExtraction
 from schemas.regression import RegressionCaseDeleteResult, RegressionCaseSaveResult, RegressionCaseSummary
 from services.extraction.providers.base import short_error
@@ -31,9 +39,10 @@ from services.regression.labeling import (
     list_labeled_cases,
     save_labeled_case,
 )
-from services.regression.runner import RegressionRunner
+from services.regression.runner import RegressionProviderUnavailableError, RegressionRunner
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class RegressionResponse(BaseModel):
@@ -43,26 +52,48 @@ class RegressionResponse(BaseModel):
     error: str | None = None
 
 @router.post("/run", response_model=RegressionResponse)
-async def run_regression_suite() -> RegressionResponse:
-    """Triggers the regression test suite and returns the scored report.
+async def run_regression_suite(
+    prompt_id: Optional[int] = Query(None, description="Prompt version to evaluate; defaults to the active prompt."),
+    db: AsyncSession = Depends(get_db),
+) -> RegressionResponse:
+    """Runs the regression suite with a specific prompt version and returns the scored report.
 
-    This allows the Backoffice UI to run regression tests on demand, evaluating
-    how well the currently active prompt performs against a benchmark set of documents.
+    This is how a prompt change is checked: pick a candidate version (it does
+    not have to be active) and compare its report with the baseline's. The
+    report records the prompt, provider and model actually used.
+
+    Args:
+        prompt_id (Optional[int]): The prompt version to evaluate. Defaults to the active prompt.
+        db (AsyncSession): The database session dependency.
 
     Returns:
         RegressionResponse: The results of the regression run, including scores and detailed metrics.
 
     Raises:
-        HTTPException: If the test suite runner encounters a fatal error (500).
+        HTTPException: 404 unknown prompt, 409 no active prompt / no real AI
+            provider configured, 500 if the runner itself crashes.
     """
+    if prompt_id is not None:
+        prompt = (await db.execute(select(PromptVersion).where(PromptVersion.id == prompt_id))).scalars().first()
+        if prompt is None:
+            raise HTTPException(status_code=404, detail=f"פרומפט {prompt_id} לא נמצא")
+    else:
+        prompt = await get_active_prompt(db)
+        if prompt is None:
+            raise HTTPException(status_code=409, detail="אין פרומפט פעיל. יש לבחור פרומפט להרצה.")
+
     try:
-        runner = RegressionRunner.from_settings()
+        runner = RegressionRunner.from_settings(
+            business_prompt=prompt.content,
+            prompt_info={"id": prompt.id, "name": prompt.name, "is_active": bool(prompt.is_active)})
+    except RegressionProviderUnavailableError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    try:
         report = await runner.run()
-        return RegressionResponse(success=True, data=report.to_dict())
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        logger.exception("Regression run failed")
+        raise HTTPException(status_code=500, detail=str(error)) from error
+    return RegressionResponse(success=True, data=report.to_dict())
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +153,9 @@ async def get_case_document_file(case_name: str) -> FileResponse:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except CaseNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    return FileResponse(path, media_type=mime_type, filename=path.name)
+    # Inline: this endpoint backs the side-by-side preview (<iframe>/<img>);
+    # "attachment" would make browsers download the file instead.
+    return FileResponse(path, media_type=mime_type, filename=path.name, content_disposition_type="inline")
 
 
 @router.post("/cases", response_model=RegressionCaseSaveResult)
@@ -164,7 +197,8 @@ async def save_case(
     except ValidationError as error:
         raise HTTPException(status_code=422, detail=f"מבנה הנתונים אינו תקין: {short_error(error)}") from error
 
-    content = await file.read() if file is not None else None
+    content = (await read_upload_or_413(file, get_settings().max_upload_mb * MB)
+               if file is not None else None)
     filename = file.filename if file is not None else None
 
     try:

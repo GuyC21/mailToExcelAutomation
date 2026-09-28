@@ -40,6 +40,12 @@ const ExtractionResultCard = ({ result }) => {
         )}
       </div>
 
+      {result.duplicate && (
+        <div className="px-4 py-2 bg-blue-50 border-b border-blue-100 text-sm text-blue-800">
+          כפילות: הקובץ כבר נקלט ממשלוח קודם של אותו מייל{result.ingestion_id ? ` (מזהה קליטה ${result.ingestion_id})` : ''} – לא נוצרה רשומה חדשה.
+        </div>
+      )}
+
       {showTechnical ? (
         <pre className="p-4 bg-gray-900 text-green-400 font-mono text-xs leading-relaxed overflow-x-auto max-h-[480px]" dir="ltr">
           {JSON.stringify(result, null, 2)}
@@ -67,7 +73,7 @@ const ExtractionResultCard = ({ result }) => {
               )}
               <p className="text-xs text-gray-400">
                 מנוע: {result.provider}{result.model ? ` / ${result.model}` : ''} · פרומפט: {result.prompt_name}
-                {result.excel && (result.excel.written ? ' · ✓ נכתב לאקסל' : ` · ⚠️ ${result.excel.message}`)}
+                {result.excel && !result.duplicate && (result.excel.written ? ' · ✓ נכתב לאקסל' : ` · ⚠️ ${result.excel.message}`)}
               </p>
             </>
           )}

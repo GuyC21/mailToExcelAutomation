@@ -25,6 +25,7 @@ export default function LabelingPage() {
   const [selectedName, setSelectedName] = useState(null);
   const [caseName, setCaseName] = useState('');
   const [initialExpected, setInitialExpected] = useState(null);
+  const [selectedMimeType, setSelectedMimeType] = useState(null);
   const [previewFile, setPreviewFile] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -43,6 +44,7 @@ export default function LabelingPage() {
     setSelectedName(null);
     setCaseName('');
     setInitialExpected(null);
+    setSelectedMimeType(null);
     setPreviewFile(null);
     resetFeedback();
   };
@@ -54,6 +56,7 @@ export default function LabelingPage() {
       setSelectedName(name);
       setCaseName(name);
       setInitialExpected(data.expected);
+      setSelectedMimeType(data.mime_type);
       setPreviewFile(null);
     } catch (err) {
       setSaveError(err.message);
@@ -67,6 +70,13 @@ export default function LabelingPage() {
       const result = await saveCase({ caseName, file, expected });
       setWarnings(result.warnings || []);
       setSuccessMessage(`התיוג "${result.case.name}" נשמר בהצלחה בחבילת הרגרסיה.`);
+      // Seed the (re-keyed) form with what was actually stored *before* the
+      // selection changes, so it reopens populated - never blank - and a
+      // second save can't overwrite the ground truth with empty values.
+      setInitialExpected(result.case.expected);
+      setSelectedMimeType(result.case.mime_type);
+      setCaseName(result.case.name);
+      setPreviewFile(null);
       setSelectedName(result.case.name);
       await refresh();
     } catch (err) {
@@ -108,7 +118,7 @@ export default function LabelingPage() {
         </div>
 
         <div className="lg:col-span-4 order-1 lg:order-2">
-          <DocumentPreview file={previewFile} url={previewUrl} />
+          <DocumentPreview file={previewFile} url={previewUrl} mimeType={selectedMimeType} />
         </div>
 
         <div className="lg:col-span-5 order-3">

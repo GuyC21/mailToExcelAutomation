@@ -16,7 +16,13 @@ Design:
       left unmatched becomes a "missing" or "extra" line and is scored 0,
       which is what actually penalises the count mismatch.
     * The overall score is a weighted blend of the header sub-score and the
-      line-items sub-score, both on a 0-100 scale.
+      line-items sub-score, both on a 0-100 scale. It is a *diagnostic*
+      number: correct optional fields can dilute a wrong payable amount.
+    * Correctness gate: identifiers and currency are compared exactly (after
+      normalisation), money uses a tight absolute tolerance only, and a
+      mismatch on any *critical* field (``ScoringConfig.critical_fields``:
+      total, supplier tax id, document number, currency) is reported in
+      ``critical_failures`` - the runner fails such a case whatever its score.
 
 No third-party dependency is required (Levenshtein distance is the ~15-line
 classic DP below) so the whole engine runs offline, in the existing test
@@ -37,6 +43,11 @@ from typing import Any, Dict, List, Optional, Tuple, Set
 _DATE_FIELDS: Set[str] = {"document_date", "billing_period_start", "billing_period_end", "due_date", "service_date"}
 _AMOUNT_FIELDS: Set[str] = {"subtotal", "vat_amount", "total_amount", "quantity", "unit_price", "line_total"}
 _PERCENT_FIELDS: Set[str] = {"vat_rate"}
+# Compared exactly after normalisation: a one-digit difference is a different entity.
+_IDENTIFIER_FIELDS: Set[str] = {"supplier_tax_id", "document_number"}
+_CURRENCY_FIELDS: Set[str] = {"currency"}
+DEFAULT_CRITICAL_FIELDS: Set[str] = {"total_amount", "supplier_tax_id", "document_number", "currency"}
+_ILS_ALIASES = {"ILS", "NIS", "₪", "ש\"ח", "ש״ח", "שח"}
 _IGNORED_FIELDS: Set[str] = {"line_items", "extraction_notes", "line_number"}
 
 DEFAULT_FIELD_WEIGHTS: Dict[str, float] = {
@@ -73,14 +84,19 @@ class ScoringConfig:
     # A fuzzy (text) field counts as "matched" once its similarity clears this bar.
     text_fuzzy_threshold: float = 0.82
     # Money fields: matched if |expected - actual| <= max(amount_abs_tolerance, amount_rel_tolerance * |expected|).
+    # A transcription must reproduce the printed amount: only rounding noise
+    # (absolute) is forgiven by default - a relative band would give 6,250
+    # full credit for a printed 6,300.
     amount_abs_tolerance: float = 1.0
-    amount_rel_tolerance: float = 0.01
+    amount_rel_tolerance: float = 0.0
     # vat_rate etc.: matched within this many percentage points.
     percent_tolerance: float = 0.5
     # Share of the overall score contributed by line_items (0..1); the rest is the header.
     line_items_weight: float = 0.4
     field_weights: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_FIELD_WEIGHTS))
     line_field_weights: Dict[str, float] = field(default_factory=lambda: dict(DEFAULT_LINE_FIELD_WEIGHTS))
+    # Header fields whose mismatch fails a case regardless of its overall score.
+    critical_fields: Set[str] = field(default_factory=lambda: set(DEFAULT_CRITICAL_FIELDS))
 
 
 @dataclass
@@ -92,7 +108,7 @@ class FieldResult:
     actual: Any
     score: float  # 0..1
     matched: bool
-    method: str  # "fuzzy" | "tolerance" | "date"
+    method: str  # "fuzzy" | "tolerance" | "date" | "exact"
 
     def to_dict(self) -> dict:
         """Serializes the result to a dictionary."""
@@ -136,6 +152,8 @@ class ScoreReport:
     line_items_score: float  # 0..100
     field_results: List[FieldResult]
     line_item_comparisons: List[LineItemComparison]
+    # Critical header fields that did not match (see ScoringConfig.critical_fields).
+    critical_failures: List[str] = field(default_factory=list)
 
     @property
     def matched_line_items(self) -> int:
@@ -163,6 +181,7 @@ class ScoreReport:
             "overall_score": round(self.overall_score, 2),
             "header_score": round(self.header_score, 2),
             "line_items_score": round(self.line_items_score, 2),
+            "critical_failures": list(self.critical_failures),
             "summary": {
                 "matched_line_items": self.matched_line_items,
                 "missing_line_items": self.missing_line_items,
@@ -304,6 +323,25 @@ def date_similarity(expected: Any, actual: Any) -> float:
     return 1.0 if a == b else 0.0
 
 
+def _normalise_identifier(value: Any) -> str:
+    """Case/whitespace-insensitive identifier; everything else must match exactly."""
+    if value is None:
+        return ""
+    return "".join(str(value).split()).casefold()
+
+
+def _normalise_currency(value: Any) -> str:
+    """ILS aliases (₪, ש"ח, NIS...) and an absent value all mean ILS - the
+    schema's default - so a transcription and an extraction compare equal."""
+    text = "".join(str(value or "").split()).upper()
+    return "ILS" if not text or text in _ILS_ALIASES else text
+
+
+def exact_similarity(expected: Any, actual: Any, normaliser=_normalise_identifier) -> float:
+    """1.0 when both normalise to the same string, else 0.0."""
+    return 1.0 if normaliser(expected) == normaliser(actual) else 0.0
+
+
 def _compare_field(name: str, expected: Any, actual: Any, config: ScoringConfig) -> FieldResult:
     """Dispatches the field to the appropriate comparison strategy based on its type.
 
@@ -325,6 +363,12 @@ def _compare_field(name: str, expected: Any, actual: Any, config: ScoringConfig)
     elif name in _DATE_FIELDS:
         score = date_similarity(expected, actual)
         method = "date"
+    elif name in _IDENTIFIER_FIELDS:
+        score = exact_similarity(expected, actual)
+        method = "exact"
+    elif name in _CURRENCY_FIELDS:
+        score = exact_similarity(expected, actual, _normalise_currency)
+        method = "exact"
     else:
         score = text_similarity(expected, actual)
         method = "fuzzy"
@@ -486,6 +530,8 @@ def score_extraction(expected: Dict[str, Any], actual: Dict[str, Any],
         expected.get("line_items") or [], actual.get("line_items") or [], config)
 
     overall = (1 - config.line_items_weight) * header_score + config.line_items_weight * line_items_score
+    critical_failures = sorted(f.field for f in field_results
+                               if f.field in config.critical_fields and not f.matched)
 
     return ScoreReport(
         overall_score=overall * 100,
@@ -493,6 +539,7 @@ def score_extraction(expected: Dict[str, Any], actual: Dict[str, Any],
         line_items_score=line_items_score * 100,
         field_results=field_results,
         line_item_comparisons=line_comparisons,
+        critical_failures=critical_failures,
     )
 
 

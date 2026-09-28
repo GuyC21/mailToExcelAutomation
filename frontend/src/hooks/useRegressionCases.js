@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { apiRequest, API_URL } from '../api/client';
+import { apiRequest, apiUrl } from '../api/client';
 
 /**
  * Turns free text into the same safe, ASCII-only case name the backend
@@ -77,7 +77,7 @@ export function useRegressionCases() {
   );
 
   /** @returns {string} URL to stream a case's source document for preview. */
-  const documentUrl = useCallback((name) => `${API_URL}/api/regression/cases/${encodeURIComponent(name)}/document`, []);
+  const documentUrl = useCallback((name) => apiUrl(`/api/regression/cases/${encodeURIComponent(name)}/document`), []);
 
   return { cases, isLoading, error, refresh, loadCase, saveCase, deleteCase, documentUrl };
 }

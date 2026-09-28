@@ -5,10 +5,11 @@ master workbook. The Excel file acts as the primary data hand-off to the finance
 """
 import os
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -54,8 +55,16 @@ async def download_workbook() -> FileResponse:
     return FileResponse(path, media_type=_XLSX_MIME, filename=filename)
 
 
-@router.post("/sync")
-async def retry_sync(db: AsyncSession = Depends(get_db)) -> Dict[str, int]:
+class SyncResult(BaseModel):
+    """Outcome of a manual Excel sync (mirrors ``services.excel_sync.sync_pending``)."""
+
+    synced: List[int]
+    pending: int
+    error: Optional[str] = None
+
+
+@router.post("/sync", response_model=SyncResult)
+async def retry_sync(db: AsyncSession = Depends(get_db)) -> SyncResult:
     """Flushes ingestions that could not be written earlier.
 
     When the finance team has the Excel file open, writing to it may fail due to
@@ -66,7 +75,7 @@ async def retry_sync(db: AsyncSession = Depends(get_db)) -> Dict[str, int]:
         db (AsyncSession): The database session dependency.
 
     Returns:
-        Dict[str, int]: A summary of the sync operation, including the number
-            of flushed records.
+        SyncResult: The ingestion ids written, how many are still pending, and
+            the reason if the workbook is still locked.
     """
-    return await sync_pending(db)
+    return SyncResult(**await sync_pending(db))

@@ -3,9 +3,21 @@ import { CheckCircle, AlertTriangle, FileText, ChevronDown, ChevronUp } from 'lu
 import ScoreGauge from './ScoreGauge';
 import FieldRow from './FieldRow';
 
+/** File name from a server path (either separator). */
+const baseName = (path) => (path || '').split(/[\\/]/).pop();
+
+/**
+ * One regression case: pass/fail, score, and the field-by-field breakdown.
+ * `testCase` is one entry of the API's `results` array; `score` is null when
+ * the extraction itself failed (then `error` explains why).
+ * @param {{testCase: object}} props
+ */
 export default function CaseCard({ testCase }) {
   const [expanded, setExpanded] = useState(false);
   const scoreData = testCase.score;
+  const criticalFailures = testCase.critical_failures || [];
+  const fieldResults = scoreData?.field_results || [];
+  const lineComparisons = scoreData?.line_item_comparisons || [];
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
@@ -24,19 +36,33 @@ export default function CaseCard({ testCase }) {
               <FileText className="w-4 h-4 text-gray-400" />
               {testCase.name}
             </h3>
-            <p className="text-xs text-gray-500">Document: {testCase.document_file}</p>
+            <p className="text-xs text-gray-500">
+              Document: {baseName(testCase.document_path)}
+              {testCase.provider && ` · ${testCase.provider}${testCase.model ? `/${testCase.model}` : ''}`}
+            </p>
+            {criticalFailures.length > 0 && (
+              <p className="text-xs text-red-600 font-medium mt-0.5">
+                שדות קריטיים שגויים: {criticalFailures.join(', ')}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right">
             <p className="text-xs text-gray-500 uppercase font-semibold">Score</p>
-            <ScoreGauge score={scoreData.score} />
+            <ScoreGauge score={scoreData ? scoreData.overall_score : null} />
           </div>
           {expanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
         </div>
       </div>
 
-      {expanded && (
+      {expanded && !scoreData && (
+        <div className="p-4 bg-red-50 border-t border-red-100 text-sm text-red-700">
+          החילוץ נכשל ולכן אין ציון: {testCase.error || 'שגיאה לא ידועה'}
+        </div>
+      )}
+
+      {expanded && scoreData && (
         <div className="p-4 bg-gray-50 border-t border-gray-200">
           <h4 className="text-sm font-bold text-gray-700 mb-2">שדות כלליים (Header)</h4>
           <div className="bg-white rounded border border-gray-200 overflow-x-auto mb-6">
@@ -51,18 +77,18 @@ export default function CaseCard({ testCase }) {
                 </tr>
               </thead>
               <tbody>
-                {scoreData.header_comparisons.map((comp, idx) => (
+                {fieldResults.map((comp, idx) => (
                   <FieldRow key={idx} field={comp} />
                 ))}
               </tbody>
             </table>
           </div>
 
-          {scoreData.line_item_comparisons.length > 0 && (
+          {lineComparisons.length > 0 && (
             <>
               <h4 className="text-sm font-bold text-gray-700 mb-2">שורות פירוט (Line Items)</h4>
               <div className="space-y-4">
-                {scoreData.line_item_comparisons.map((line, idx) => (
+                {lineComparisons.map((line, idx) => (
                   <div key={idx} className="bg-white rounded border border-gray-200 overflow-x-auto">
                     <div className="bg-gray-100 py-1 px-3 text-xs font-semibold text-gray-600 flex justify-between min-w-[500px]">
                       <span>שורה {idx + 1} - סטטוס: {line.status}</span>

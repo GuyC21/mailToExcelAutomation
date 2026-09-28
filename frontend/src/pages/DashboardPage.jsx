@@ -1,9 +1,23 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useDashboard } from '../hooks/useDashboard';
+import { apiUrl } from '../api/client';
 import { TrendingUp, FileText, AlertCircle, RefreshCw } from 'lucide-react';
 
-const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
+/**
+ * Formats an amount in its own currency (never assumes shekels).
+ * Falls back to "<amount> <code>" for codes Intl does not know.
+ * @param {number} value
+ * @param {string} currency - ISO-like code from the API, e.g. "ILS", "USD".
+ */
+function formatMoney(value, currency) {
+  const amount = Number(value) || 0;
+  try {
+    return new Intl.NumberFormat('he-IL', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
+  } catch {
+    return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+  }
+}
 
 /**
  * DashboardPage Component
@@ -19,7 +33,8 @@ const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
  * @returns {JSX.Element} The rendered Dashboard page.
  */
 export default function DashboardPage() {
-  const { stats, loading, error, refresh } = useDashboard();
+  const [scope, setScope] = useState('operational');
+  const { stats, loading, error, refresh } = useDashboard(scope);
 
   if (loading) {
     return (
@@ -40,28 +55,64 @@ export default function DashboardPage() {
 
   return (
     <div className="w-full space-y-6">
-      <header className="flex justify-between items-center bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
+      <header className="flex flex-wrap gap-4 justify-between items-center bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-blue-900">דאשבורד פיננסי</h1>
           <p className="text-gray-500 mt-1">מבט על לביצועי המערכת וקליטת החשבוניות</p>
         </div>
-        <button 
-          onClick={refresh}
-          className="p-2 text-gray-500 hover:bg-gray-100 rounded transition"
-          title="רענן נתונים"
-        >
-          <RefreshCw className="w-5 h-5" />
-        </button>
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            className="border border-gray-300 rounded px-3 py-2 text-sm bg-white"
+            aria-label="היקף הנתונים"
+          >
+            <option value="operational">נתונים תפעוליים בלבד</option>
+            <option value="all">כולל בדיקות (סנדבוקס / דמה)</option>
+          </select>
+          <a
+            href={apiUrl('/api/excel/download')}
+            download
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm font-medium"
+          >
+            הורד אקסל מלא
+          </a>
+          <button 
+            onClick={refresh}
+            className="p-2 text-gray-500 hover:bg-gray-100 rounded transition"
+            title="רענן נתונים"
+          >
+            <RefreshCw className="w-5 h-5" />
+          </button>
+        </div>
       </header>
+
+      {scope === 'operational' && stats.excluded_test_documents > 0 && (
+        <div className="bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded-lg text-sm">
+          {stats.excluded_test_documents} מסמכי בדיקה (העלאה ידנית בסנדבוקס או חילוץ דמה) אינם נכללים בנתונים.
+          ניתן להציגם דרך בורר ההיקף.
+        </div>
+      )}
+      {scope === 'all' && (
+        <div className="bg-yellow-50 border border-yellow-100 text-yellow-800 p-3 rounded-lg text-sm">
+          תצוגת בדיקה: הנתונים כוללים העלאות סנדבוקס וחילוצי דמה ואינם מייצגים פעילות פיננסית אמיתית.
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex items-center justify-between">
           <div>
-            <p className="text-gray-500 text-sm font-medium">סה"כ סכום שטופל</p>
-            <h3 className="text-3xl font-bold text-gray-800 mt-1">
-              ₪{stats.total_amount_processed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h3>
+            <p className="text-gray-500 text-sm font-medium">סה"כ סכום שטופל (מסמכים תקינים, לפי מטבע)</p>
+            {stats.totals_by_currency.length === 0 ? (
+              <h3 className="text-3xl font-bold text-gray-800 mt-1">{formatMoney(0, 'ILS')}</h3>
+            ) : (
+              stats.totals_by_currency.map((total) => (
+                <h3 key={total.currency} className="text-3xl font-bold text-gray-800 mt-1" dir="ltr">
+                  {formatMoney(total.amount, total.currency)}
+                </h3>
+              ))
+            )}
           </div>
           <div className="bg-green-100 p-3 rounded-full text-green-600">
             <TrendingUp className="w-8 h-8" />
@@ -111,7 +162,9 @@ export default function DashboardPage() {
 
         {/* Top Suppliers */}
         <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex flex-col h-[300px] lg:h-full">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">ספקים מובילים (לפי סכום)</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">
+            ספקים מובילים (לפי סכום{stats.top_suppliers_currency ? `, ${stats.top_suppliers_currency}` : ''})
+          </h3>
           <div className="flex-1 min-h-0" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
@@ -126,7 +179,7 @@ export default function DashboardPage() {
                   width={140} 
                   tick={{ fontSize: 11, fill: '#4b5563' }} 
                 />
-                <Tooltip formatter={(value) => `₪${value.toLocaleString()}`} />
+                <Tooltip formatter={(value) => formatMoney(value, stats.top_suppliers_currency || 'ILS')} />
                 <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>

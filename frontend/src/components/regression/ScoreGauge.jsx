@@ -1,14 +1,22 @@
 import React from 'react';
 
+/**
+ * Shows a 0-100 score (the backend's scale) as a percentage.
+ * `null`/`undefined` (e.g. an extraction that failed) renders as a dash.
+ * @param {{score: number|null|undefined}} props
+ */
 export default function ScoreGauge({ score }) {
-  const percentage = (score * 100).toFixed(1);
+  if (score === null || score === undefined || Number.isNaN(Number(score))) {
+    return <div className="text-2xl font-bold text-gray-400">—</div>;
+  }
+  const value = Number(score);
   let color = 'text-red-500';
-  if (score >= 0.9) color = 'text-green-500';
-  else if (score >= 0.7) color = 'text-yellow-500';
+  if (value >= 90) color = 'text-green-500';
+  else if (value >= 70) color = 'text-yellow-500';
 
   return (
     <div className={`text-2xl font-bold ${color}`}>
-      {percentage}%
+      {value.toFixed(1)}%
     </div>
   );
 }

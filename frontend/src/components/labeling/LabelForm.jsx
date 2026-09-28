@@ -16,6 +16,31 @@ const EMPTY_EXPECTED = {
 };
 
 /**
+ * Seeds form state from stored ground truth. Stored values use `null` for
+ * "missing"; inputs need `''` (a `null` value would make them uncontrolled
+ * and show stale text).
+ * @param {object|null} expected
+ * @returns {object}
+ */
+function toFormState(expected) {
+  if (!expected) return EMPTY_EXPECTED;
+  const blank = (v) => (v === null || v === undefined ? '' : v);
+  const state = { ...EMPTY_EXPECTED };
+  Object.keys(EMPTY_EXPECTED).forEach((key) => {
+    if (key !== 'line_items' && key in expected) state[key] = blank(expected[key]);
+  });
+  state.currency = expected.currency || 'ILS';
+  state.line_items = (expected.line_items || []).map((line) => ({
+    service_date: blank(line.service_date),
+    description: blank(line.description),
+    quantity: blank(line.quantity),
+    unit_price: blank(line.unit_price),
+    line_total: blank(line.line_total),
+  }));
+  return state;
+}
+
+/**
  * Converts the form's all-string field state into the numeric/null shape
  * `schemas.extraction.DocumentExtraction` expects. Empty strings become
  * `null` (rather than being posted as `""`), matching what a genuinely
@@ -78,7 +103,7 @@ function toPayload(fields) {
  */
 const LabelForm = ({ caseName, onCaseNameChange, isNewCase, initialExpected, onFileSelected,
                     onSubmit, isSaving, warnings, saveError }) => {
-  const [fields, setFields] = useState(() => (initialExpected ? { ...EMPTY_EXPECTED, ...initialExpected } : EMPTY_EXPECTED));
+  const [fields, setFields] = useState(() => toFormState(initialExpected));
   const [file, setFile] = useState(null);
   const [nameTouched, setNameTouched] = useState(Boolean(initialExpected));
 
