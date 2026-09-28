@@ -7,7 +7,7 @@ This system automatically ingests incoming emails containing Hebrew reconciliati
 Ensure you have Docker and Docker Compose installed.
 
 1. Clone this repository.
-2. (Optional) Copy `.env.example` to `.env` and configure your API keys. If no key is provided, the API uses a local mock extraction mode.
+2. Copy `.env.example` to `.env` and configure your API keys. If no key is provided, the API uses a local mock extraction mode.
 3. Run the following command from the root directory:
 
 ```bash
