@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 # Anything else (bad request, safety block) would fail identically again, so
 # we stop early instead of burning the whole fallback chain on it.
 _FALLBACK_MARKERS = (
-    "429", "quota", "resource_exhausted", "404", "not found", "500", "503", "unavailable", "overloaded",
+    "429", "quota", "resource_exhausted", "404", "not found", "500", "503", "504", "unavailable", "overloaded",
     "ssl", "eof", "broken pipe", "connection reset", "connection aborted", "remotedisconnected",
-    "connectionerror", "timed out", "timeout",
+    "connectionerror", "timed out", "timeout", "deadline",
 )
 _USER_PROMPT = "Extract the data from the attached document according to the system instructions."
 _UPLOAD_RETRIES = 3
