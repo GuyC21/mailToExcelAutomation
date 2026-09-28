@@ -5,6 +5,7 @@ import HomePage from './pages/HomePage';
 import SandboxPage from './pages/SandboxPage';
 import DashboardPage from './pages/DashboardPage';
 import RegressionPage from './pages/RegressionPage';
+import LabelingPage from './pages/LabelingPage';
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/prompts" element={<HomePage />} />
           <Route path="/sandbox" element={<SandboxPage />} />
           <Route path="/regression" element={<RegressionPage />} />
+          <Route path="/labeling" element={<LabelingPage />} />
         </Routes>
       </main>
     </div>

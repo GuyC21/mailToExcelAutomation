@@ -1,10 +1,10 @@
 """Extraction orchestrator: envelope -> provider chain -> JSON -> schema.
 
-Fallback policy (a design decision – see README):
+Fallback policy (a design decision - see README):
     1. Gemini (each configured model in order), then OpenAI if a key exists.
     2. The first provider whose answer parses into the schema wins.
     3. If every provider fails, the outcome is EXTRACTION_FAILED with the full
-       list of attempts – it is persisted and written to Excel like any other
+       list of attempts - it is persisted and written to Excel like any other
        document, so a failure is always visible and traceable, never swallowed.
     4. The mock provider is used only when no real provider is configured.
 """

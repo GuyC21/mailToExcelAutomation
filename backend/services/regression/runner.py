@@ -33,7 +33,7 @@ import mimetypes
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple, Union, Any, Dict
+from typing import List, Optional, Tuple, Union
 
 from config import get_settings
 from services.extraction.extractor import DocumentExtractor
@@ -42,7 +42,6 @@ from services.regression.scorer import ScoreReport, ScoringConfig, score_extract
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SUITE_DIR = Path("data/regression_suite")
 DEFAULT_PASS_THRESHOLD = 80.0
 # A neutral business prompt: regression measures the *technical* pipeline's
 # transcription accuracy, so it deliberately does not depend on whatever the
@@ -51,19 +50,26 @@ DEFAULT_BUSINESS_PROMPT = (
     "חלץ את כל הנתונים מהמסמך המצורף בנאמנות מלאה למקור, ללא תיקון או חישוב מחדש."
 )
 
-_DOCUMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp"}
-_EXPECTED_SUFFIX = "_expected.json"
+# Public so ``services.regression.labeling`` (which writes suite cases) and
+# ``discover_cases`` (which reads them) agree on exactly one definition of
+# "what a suite case looks like".
+DOCUMENT_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp"}
+EXPECTED_SUFFIX = "_expected.json"
+
+
+def default_suite_dir() -> Path:
+    """Resolves ``<DATA_DIR>/regression_suite`` from settings.
+
+    Reading this from ``settings.data_dir`` (rather than a hardcoded
+    ``Path("data/regression_suite")``) is what lets the runner and the
+    labeling UI (``services.regression.labeling.suite_dir``) agree on the
+    suite's location even if ``DATA_DIR`` is overridden in the environment.
+    """
+    return Path(get_settings().data_dir) / "regression_suite"
 
 
 def guess_mime_type(path: Path) -> str:
-    """Best-effort MIME type from the file extension.
-
-    Args:
-        path: Path to the file.
-
-    Returns:
-        The inferred MIME type as a string, or 'application/octet-stream' if unknown.
-    """
+    """Best-effort MIME type from the file extension."""
     mime, _ = mimetypes.guess_type(path.name)
     return mime or "application/octet-stream"
 
@@ -84,20 +90,14 @@ def discover_cases(suite_dir: Union[Path, str]) -> Tuple[List[SuiteCase], List[s
     file (or vice versa) is never silently skipped — it becomes a warning, so
     a typo'd file name surfaces immediately instead of quietly shrinking the
     suite.
-
-    Args:
-        suite_dir: Path to the directory containing regression test files.
-
-    Returns:
-        A tuple of (list of valid SuiteCases, list of warning messages).
     """
     suite_dir = Path(suite_dir)
     if not suite_dir.is_dir():
         return [], [f"תיקיית הסוויטה אינה קיימת: {suite_dir}"]
 
     documents = {p.stem: p for p in suite_dir.iterdir()
-                if p.is_file() and p.suffix.lower() in _DOCUMENT_EXTENSIONS}
-    expected_files = {p.name[: -len(_EXPECTED_SUFFIX)]: p for p in suite_dir.glob(f"*{_EXPECTED_SUFFIX}")}
+                if p.is_file() and p.suffix.lower() in DOCUMENT_EXTENSIONS}
+    expected_files = {p.name[: -len(EXPECTED_SUFFIX)]: p for p in suite_dir.glob(f"*{EXPECTED_SUFFIX}")}
 
     warnings: List[str] = []
     cases: List[SuiteCase] = []
@@ -106,7 +106,7 @@ def discover_cases(suite_dir: Union[Path, str]) -> Tuple[List[SuiteCase], List[s
         if document and expected:
             cases.append(SuiteCase(name=stem, document_path=document, expected_path=expected))
         elif document:
-            warnings.append(f"אין קובץ ground-truth עבור {document.name} (מצופה: {stem}{_EXPECTED_SUFFIX})")
+            warnings.append(f"אין קובץ ground-truth עבור {document.name} (מצופה: {stem}{EXPECTED_SUFFIX})")
         else:
             warnings.append(f"אין מסמך תואם לקובץ {expected.name}")
     return cases, warnings
@@ -126,7 +126,6 @@ class TestCaseResult:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        """Serializes the result to a dictionary."""
         return {
             "name": self.name,
             "document_path": self.document_path,
@@ -151,27 +150,22 @@ class RegressionReport:
 
     @property
     def total(self) -> int:
-        """Total number of cases run."""
         return len(self.results)
 
     @property
     def passed(self) -> int:
-        """Number of cases that passed the score threshold."""
         return sum(1 for r in self.results if r.passed)
 
     @property
     def failed(self) -> int:
-        """Number of cases that failed or error'd out."""
         return self.total - self.passed
 
     @property
     def average_score(self) -> float:
-        """Average overall score across all successfully scored cases."""
         scored = [r.score.overall_score for r in self.results if r.score]
         return sum(scored) / len(scored) if scored else 0.0
 
     def to_dict(self) -> dict:
-        """Serializes the full regression report to a dictionary."""
         return {
             "suite_dir": self.suite_dir,
             "generated_at": self.generated_at,
@@ -197,44 +191,24 @@ class RegressionRunner:
 
     def __init__(self, extractor: DocumentExtractor, business_prompt: str = DEFAULT_BUSINESS_PROMPT,
                 scoring_config: Optional[ScoringConfig] = None,
-                pass_threshold: float = DEFAULT_PASS_THRESHOLD) -> None:
-        """Initializes the runner.
-
-        Args:
-            extractor: The extraction logic to use.
-            business_prompt: The simulated user prompt to use during extraction.
-            scoring_config: Configuration for the scoring algorithm.
-            pass_threshold: The minimum score (0-100) required to pass a case.
-        """
+                pass_threshold: float = DEFAULT_PASS_THRESHOLD):
         self._extractor = extractor
         self._business_prompt = business_prompt
         self._scoring_config = scoring_config or ScoringConfig()
         self._pass_threshold = pass_threshold
 
     @classmethod
-    def from_settings(cls, **kwargs: Any) -> "RegressionRunner":
-        """Builds a runner wired to the real ``GeminiProvider`` only.
-
-        Args:
-            **kwargs: Extra initialization arguments to pass to RegressionRunner.
-
-        Returns:
-            A pre-configured RegressionRunner.
-        """
+    def from_settings(cls, **kwargs) -> "RegressionRunner":
+        """Builds a runner wired to the real ``GeminiProvider`` only."""
         settings = get_settings()
         provider = GeminiProvider(settings.gemini_api_key, settings.gemini_model_chain)
         extractor = DocumentExtractor([provider])
         return cls(extractor, **kwargs)
 
-    async def run(self, suite_dir: Union[Path, str] = DEFAULT_SUITE_DIR) -> RegressionReport:
-        """Runs every case in ``suite_dir`` and returns the aggregate report.
-
-        Args:
-            suite_dir: Path to the directory containing regression test files.
-
-        Returns:
-            A comprehensive RegressionReport detailing the outcome of the run.
-        """
+    async def run(self, suite_dir: Optional[Union[Path, str]] = None) -> RegressionReport:
+        """Runs every case in ``suite_dir`` (default: ``default_suite_dir()``) and
+        returns the aggregate report."""
+        suite_dir = suite_dir if suite_dir is not None else default_suite_dir()
         cases, warnings = discover_cases(suite_dir)
         report = RegressionReport(
             suite_dir=str(suite_dir),
@@ -247,14 +221,6 @@ class RegressionRunner:
         return report
 
     async def _run_case(self, case: SuiteCase) -> TestCaseResult:
-        """Runs and scores a single test case.
-
-        Args:
-            case: The SuiteCase object representing the test files.
-
-        Returns:
-            The TestCaseResult detailing the extraction outcome and score.
-        """
         try:
             expected = json.loads(case.expected_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
@@ -264,7 +230,7 @@ class RegressionRunner:
         outcome = await self._extractor.extract(
             self._business_prompt, str(case.document_path), guess_mime_type(case.document_path))
 
-        if not outcome.succeeded or outcome.data is None:
+        if not outcome.succeeded:
             return TestCaseResult(case.name, str(case.document_path), str(case.expected_path),
                                   passed=False, provider=outcome.provider, model=outcome.model,
                                   error=outcome.error or "extraction failed")
@@ -281,24 +247,14 @@ class RegressionRunner:
 # ---------------------------------------------------------------------------
 
 def _parse_args() -> argparse.Namespace:
-    """Parses command line arguments for the regression runner script.
-
-    Returns:
-        The populated argparse Namespace.
-    """
     parser = argparse.ArgumentParser(description="Run the extraction regression suite against ground truth.")
-    parser.add_argument("--suite-dir", default=str(DEFAULT_SUITE_DIR))
+    parser.add_argument("--suite-dir", default=None, help="Defaults to <DATA_DIR>/regression_suite.")
     parser.add_argument("--threshold", type=float, default=DEFAULT_PASS_THRESHOLD)
     parser.add_argument("--output", default=None, help="Also write the JSON report to this path.")
     return parser.parse_args()
 
 
 async def _main() -> int:
-    """Main CLI entry point for executing the regression suite.
-
-    Returns:
-        0 on success (all tests pass), 1 on failure.
-    """
     logging.basicConfig(level=logging.INFO)
     args = _parse_args()
     runner = RegressionRunner.from_settings(pass_threshold=args.threshold)

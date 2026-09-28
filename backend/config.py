@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # Ordered fallback chain. Free-tier quotas are per model, so falling back to
     # a sibling model on 429/404 keeps the pipeline alive during demos.
-    gemini_models: str = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite"
+    gemini_models: str = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-1.5-pro,gemini-1.5-flash,gemini-1.5-flash-8b"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
 

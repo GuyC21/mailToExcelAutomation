@@ -6,6 +6,7 @@ const navItems = [
   { id: 'prompts', path: '/prompts', label: 'ניהול פרומפטים' },
   { id: 'sandbox', path: '/sandbox', label: 'טסטר חילוץ' },
   { id: 'regression', path: '/regression', label: 'בדיקות רגרסיה' },
+  { id: 'labeling', path: '/labeling', label: 'תיוג מסמכים' },
 ];
 
 export default function Topbar() {
@@ -18,7 +19,7 @@ export default function Topbar() {
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">G</div>
             <span className="font-bold text-xl text-blue-900">GoldenCare AI</span>
           </div>
-          
+
           {/* Nav Links Section - Scrolling on Mobile */}
           <div className="flex items-center overflow-x-auto overflow-y-hidden py-2 md:py-0 no-scrollbar md:mr-10">
             <div className="flex space-x-2 space-x-reverse min-w-max mx-auto md:mx-0 px-2 md:px-0">
