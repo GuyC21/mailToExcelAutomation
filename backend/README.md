@@ -26,8 +26,6 @@ The backend is organized into several key services:
 
 ## Deep Dive: Regression Methods
 
-*The user highlighted this area as complex. Here is a clear breakdown of how the Regression testing works.*
-
 ### 1. What is the Regression Suite?
 When you change the AI prompt, you want to improve extraction on documents that were failing. However, you risk breaking documents that the AI used to read perfectly. 
 **Regression testing prevents this.** It is an automated test suite that takes a fixed set of historical documents, runs them through the AI with your *new* prompt, and scores the result against human-verified "Ground Truth" answers.
