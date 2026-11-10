@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/goldencare"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/billingstream"
     sql_echo: bool = False  # Off by default: SQL echo would log extracted PII.
 
     # --- AI providers -----------------------------------------------------
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     # --- Storage ----------------------------------------------------------
     data_dir: str = "data"
-    excel_path: str = "data/GoldenCare_Master.xlsx"
+    excel_path: str = "data/BillingStream_Master.xlsx"
     inbox_dir: str = "data/inbox"
     max_upload_mb: int = 15
     # Hard cap on any request body (all attachments of one email together).
@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     # ``?api_key=`` for plain links such as downloads / previews). Empty keeps
     # the local-demo behaviour; set it before exposing the API beyond localhost.
     backoffice_api_key: str = ""
+
+    # --- Supabase Identity & Auth -----------------------------------------
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_jwt_secret: str = ""
+    supabase_service_role_key: str = ""
+    initial_admin_email: str = "admin@billingstream.local"
 
     @property
     def gemini_model_chain(self) -> List[str]:

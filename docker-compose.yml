@@ -1,7 +1,9 @@
+name: billingStream
+
 services:
   db:
     image: postgres:15-alpine
-    container_name: goldencare_db
+    container_name: billingstream_db
     # Loopback only: reachable from this machine (e.g. a backend run outside
     # Docker), never from the network. Containers talk over the compose network.
     ports:
@@ -9,7 +11,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-goldencare}
+      POSTGRES_DB: ${POSTGRES_DB:-billingstream}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,13 +23,14 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: goldencare_backend
+    image: billingstream-backend:latest
+    container_name: billingstream_backend
     # Loopback only. The Backoffice API has no per-user auth; before exposing it
     # beyond this machine set BACKOFFICE_API_KEY (and VITE_API_KEY for the UI).
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-goldencare}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-billingstream}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODELS=${GEMINI_MODELS:-gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
@@ -35,6 +38,11 @@ services:
       - DEFAULT_VAT_RATE=${DEFAULT_VAT_RATE:-18}
       - INBOUND_EMAIL_TOKEN=${INBOUND_EMAIL_TOKEN:-}
       - BACKOFFICE_API_KEY=${BACKOFFICE_API_KEY:-}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
+      - INITIAL_ADMIN_EMAIL=${INITIAL_ADMIN_EMAIL:-admin@billingstream.local}
     volumes:
       - ./backend:/app
       - ./data:/app/data
@@ -46,7 +54,8 @@ services:
   frontend:
     build:
       context: ./frontend
-    container_name: goldencare_frontend
+    image: billingstream-frontend:latest
+    container_name: billingstream_frontend
     ports:
       - "127.0.0.1:5173:5173"
     volumes:
@@ -55,9 +64,13 @@ services:
     environment:
       - VITE_API_URL=http://localhost:8000
       - VITE_API_KEY=${BACKOFFICE_API_KEY:-}
+      - VITE_SUPABASE_URL=${SUPABASE_URL:-}
+      - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
     depends_on:
       - backend
-    command: npm run dev -- --host 0.0.0.0
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
 
 volumes:
   postgres_data:
+    name: billingstream_postgres_data
+    external: true

@@ -1,4 +1,4 @@
-# GoldenCare Frontend (Backoffice)
+# BillingStream Frontend (Backoffice)
 
 The frontend is a React Single Page Application (SPA) built with Vite and Tailwind CSS. It serves as the internal Backoffice UI for the finance and operations teams to monitor the system, review failed AI extractions, manage prompts, and run regression tests.
 

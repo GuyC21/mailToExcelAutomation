@@ -4,7 +4,7 @@ import { apiRequest } from '../api/client';
 /**
  * Hook: useEmailInbound
  * 
- * Handles the simulation of incoming emails for the GoldenCare backoffice.
+ * Handles the simulation of incoming emails for the BillingStream backoffice.
  * This abstracts away the complexity of building multipart form data for 
  * either manually composed emails or raw .eml files. By keeping this here,
  * the Sandbox UI components only need to deal with the presentation of results.
@@ -48,7 +48,7 @@ export function useEmailInbound() {
     form.append('to', email.to);
     form.append('subject', email.subject);
     form.append('text', email.text);
-    form.append('headers', 'X-Mailer: GoldenCare Backoffice Simulator\nX-Priority: 3');
+    form.append('headers', 'X-Mailer: BillingStream Backoffice Simulator\nX-Priority: 3');
     email.files.forEach((file) => form.append('attachments', file));
     return send('/api/email/inbound', form);
   };

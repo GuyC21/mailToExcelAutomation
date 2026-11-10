@@ -158,7 +158,7 @@ const LabelForm = ({ caseName, onCaseNameChange, isNewCase, initialExpected, onF
           <FormField label="סוף תקופת חיוב" type="date" value={fields.billing_period_end} onChange={setField('billing_period_end')} />
           <FormField label="תאריך פירעון" type="date" value={fields.due_date} onChange={setField('due_date')} />
           <FormField label="סוג מסמך" value={fields.document_type} onChange={setField('document_type')} placeholder="טופס התחשבנות" />
-          <FormField label="שם לקוח" value={fields.customer_name} onChange={setField('customer_name')} placeholder="GoldenCare" />
+          <FormField label="שם לקוח" value={fields.customer_name} onChange={setField('customer_name')} placeholder="BillingStream" />
           <FormField label="מטבע" value={fields.currency} onChange={setField('currency')} placeholder="ILS" />
           <FormField label="תנאי תשלום" value={fields.payment_terms} onChange={setField('payment_terms')} placeholder="שוטף + 30" />
         </div>

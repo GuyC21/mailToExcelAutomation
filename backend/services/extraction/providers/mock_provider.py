@@ -19,7 +19,7 @@ _VALID_DOC = {
     "billing_period_end": "2026-08-31",
     "supplier_name": "ספק לדוגמה בע\"מ (MOCK)",
     "supplier_tax_id": "510000000",
-    "customer_name": "גולדנקייר שירותי סיעוד ורפואה בע\"מ",
+    "customer_name": "בילינגסטרים שירותי סיעוד ורפואה בע\"מ",
     "currency": "ILS",
     "payment_terms": "שוטף + 30",
     "line_items": [

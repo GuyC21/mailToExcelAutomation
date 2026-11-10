@@ -1,4 +1,4 @@
-"""The Excel workbook that serves as GoldenCare's source of truth.
+"""The Excel workbook that serves as BillingStream's source of truth.
 
 Writes are serialised with a lock and saved atomically (temp file + replace)
 so a crash mid-write can never corrupt the accumulated workbook. If the file

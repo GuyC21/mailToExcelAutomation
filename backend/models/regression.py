@@ -31,7 +31,7 @@ class RegressionRun(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
-    prompt_version_id = Column(Integer, ForeignKey("prompt_versions.id"), nullable=True, index=True)
+    prompt_version_id = Column(Integer, ForeignKey("prompt_versions.id", ondelete="SET NULL"), nullable=True, index=True)
     prompt_name = Column(String, nullable=True)
     prompt_is_active = Column(Boolean, nullable=True)
 

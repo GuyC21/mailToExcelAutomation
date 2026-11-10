@@ -28,7 +28,7 @@ def test_health_reports_mock_provider(client):
 def test_multipart_email_processes_pdf_and_skips_other_attachments(client):
     response = client.post(
         "/api/email/inbound",
-        data={"from": "billing@medipharm-care.co.il", "to": "invoices@goldencare.co.il",
+        data={"from": "billing@medipharm-care.co.il", "to": "invoices@billingstream.co.il",
               "subject": "טופס התחשבנות אוגוסט", "text": "מצורף הטופס", "headers": "X-Mailer: Outlook"},
         files=[("attachments", ("טופס.pdf", PDF, "application/pdf")),
                ("attachments", ("notes.txt", b"hello", "text/plain"))],
@@ -46,7 +46,7 @@ def test_multipart_email_processes_pdf_and_skips_other_attachments(client):
 
 def test_eml_and_json_formats(client):
     message = EmailMessage()
-    message["From"], message["To"], message["Subject"] = "a@b.co.il", "invoices@goldencare.co.il", "חשבונית"
+    message["From"], message["To"], message["Subject"] = "a@b.co.il", "invoices@billingstream.co.il", "חשבונית"
     message.set_content("גוף")
     message.add_attachment(PDF, maintype="application", subtype="pdf", filename="form.pdf")
     eml = client.post("/api/email/inbound/eml", files={"file": ("m.eml", message.as_bytes(), "message/rfc822")})

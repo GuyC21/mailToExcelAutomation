@@ -1,4 +1,4 @@
-"""Column layout of the GoldenCare master workbook (Hebrew, RTL).
+"""Column layout of the BillingStream master workbook (Hebrew, RTL).
 
 Two sheets, by design:
     * "מסמכים"      – one row per ingested document, INCLUDING failures, with a

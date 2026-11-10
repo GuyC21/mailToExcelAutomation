@@ -58,7 +58,7 @@ const HomePage = () => {
   return (
     <div className="w-full">
       <header className="mb-6 md:mb-8 flex flex-col md:flex-row justify-between items-center bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
-        <h1 className="text-2xl md:text-3xl font-bold text-blue-900">GoldenCare Backoffice - ניהול פרומפטים</h1>
+        <h1 className="text-2xl md:text-3xl font-bold text-blue-900">BillingStream Backoffice - ניהול פרומפטים</h1>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 lg:h-[680px]">

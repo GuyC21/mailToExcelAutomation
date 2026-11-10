@@ -1,8 +1,7 @@
-"""Test bootstrap: importable backend root + isolated, offline configuration.
+"""Test bootstrap: importable backend root + isolated configuration.
 
-Environment variables are set before any application module is imported, so
-the cached settings point at a throw-away SQLite DB and temp data folder and
-the mock provider is used (no API keys, no network).
+Defaults to the project's production PostgreSQL asyncpg driver, or respects
+DATABASE_URL if provided.
 """
 import os
 import sys
@@ -10,10 +9,14 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-_TMP = tempfile.mkdtemp(prefix="goldencare-tests-")
+_TMP = tempfile.mkdtemp(prefix="billingstream-tests-")
+
+default_pg = "postgresql+asyncpg://postgres:postgres@localhost:5432/billingstream"
+db_url = os.environ.get("DATABASE_URL", default_pg)
+
 os.environ.update({
-    "DATABASE_URL": f"sqlite+aiosqlite:///{_TMP}/test.db",
-    "EXCEL_PATH": f"{_TMP}/GoldenCare_Master.xlsx",
+    "DATABASE_URL": db_url,
+    "EXCEL_PATH": f"{_TMP}/BillingStream_Master.xlsx",
     "INBOX_DIR": f"{_TMP}/inbox",
     "GEMINI_API_KEY": "",
     "OPENAI_API_KEY": "",

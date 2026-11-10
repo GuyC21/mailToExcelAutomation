@@ -140,7 +140,7 @@ async def delete_prompt(prompt_id: int, db: AsyncSession = Depends(get_db)) -> D
         raise HTTPException(status_code=404, detail="Prompt not found")
     
     if prompt.is_active:
-        raise HTTPException(status_code=400, detail="Cannot delete active prompt")
+        raise HTTPException(status_code=400, detail="לא ניתן למחוק את הפרומפט הפעיל. יש להפעיל פרומפט אחר תחילה.")
         
     await db.delete(prompt)
     await db.commit()
