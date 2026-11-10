@@ -1,4 +1,4 @@
-# GoldenCare AI Automation & Backoffice
+# BillingStream AI Automation & Backoffice
 
 This system automatically ingests incoming emails containing Hebrew reconciliation forms, extracts structured data via AI, maintains an Excel source of truth, and provides a Backoffice UI for finance personnel to manage prompts and test extractions.
 
@@ -17,7 +17,7 @@ docker compose up --build
 ### Accessing the Services
 - **Frontend (Backoffice UI):** [http://localhost:5173](http://localhost:5173)
 - **Backend API (Swagger Docs):** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Database:** `localhost:5432` (User: `postgres`, Password: `postgres`, DB: `goldencare`)
+- **Database:** `localhost:5432` (User: `postgres`, Password: `postgres`, DB: `billingstream`)
 
 ## Project Structure
 - `/backend`: FastAPI Python server (LLM integration, Excel generation, API routes).
@@ -62,7 +62,7 @@ Set `INBOUND_EMAIL_TOKEN` to require an `X-Inbound-Token` header from webhook ca
 - **Fallback chain** – Gemini models in order (`GEMINI_MODELS`, next model on quota/unavailable errors) → OpenAI if a key is set → recorded as `EXTRACTION_FAILED`. With no API key at all, a clearly labelled `mock` engine is used.
 - **Excel safety** – writes are locked and atomic. If the workbook is open in Excel, rows stay pending in the DB and are flushed on the next ingestion, on startup, or via `POST /api/excel/sync`.
 
-### Excel source of truth (`data/GoldenCare_Master.xlsx`, RTL)
+### Excel source of truth (`data/BillingStream_Master.xlsx`, RTL)
 - **מסמכים** – one row per document: status, issues, email sender/subject, supplier, document number/date, billing period, subtotal, VAT, total, extraction engine, prompt version.
 - **שורות חיוב** – one row per charge line with a per-line calculation check.
 

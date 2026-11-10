@@ -10,8 +10,9 @@ import models.ingestion  # noqa: F401
 import models.processed_attachment  # noqa: F401
 import models.prompt  # noqa: F401
 import models.regression  # noqa: F401 (registers RegressionRun for Run History)
-from api.routes import email, excel, ingestion, prompts, regression, dashboard, documents
-from api.security import require_backoffice_key
+import models.user  # noqa: F401 (registers UserProfile with Base.metadata)
+from api.dependencies.auth import require_approved_user
+from api.routes import auth, dashboard, documents, email, excel, ingestion, prompts, regression
 from api.uploads import MB, BodySizeLimitMiddleware
 from config import get_settings
 from database import Base, async_session, engine
@@ -19,7 +20,7 @@ from services.excel_sync import sync_pending
 from services.ingestion_pipeline import get_extractor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger("goldencare")
+logger = logging.getLogger("billingstream")
 
 
 @contextlib.asynccontextmanager
@@ -35,14 +36,16 @@ async def lifespan(app: FastAPI):
         # Creates / validates the workbook (rebuilding it from the DB if it is
         # missing or belongs to another database) and flushes pending rows.
         await sync_pending(db)
-    if not get_settings().backoffice_api_key:
-        logger.warning("BACKOFFICE_API_KEY is not set: the Backoffice API is open to anyone who can reach it. "
-                       "Keep it bound to localhost (see docker-compose.yml) or set a key.")
+    if not get_settings().supabase_jwt_secret and not get_settings().backoffice_api_key:
+        logger.warning(
+            "SUPABASE_JWT_SECRET and BACKOFFICE_API_KEY are not set. "
+            "Set SUPABASE_JWT_SECRET to enforce signed JWT authentication."
+        )
     logger.info("Extraction providers: %s", get_extractor().provider_names)
     yield
 
 
-app = FastAPI(title="GoldenCare AI Automation API", lifespan=lifespan)
+app = FastAPI(title="BillingStream AI Automation API", lifespan=lifespan)
 
 # Added before CORS so CORS stays the outer layer and a 413 still carries CORS headers.
 app.add_middleware(BodySizeLimitMiddleware, max_bytes=get_settings().max_request_mb * MB)
@@ -56,10 +59,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_backoffice = [Depends(require_backoffice_key)]  # no-op unless BACKOFFICE_API_KEY is set
+# Authentication & Admin routes (profile sync, status inspection, admin user approvals)
+app.include_router(auth.router, prefix="/api", tags=["Auth & Admin"])
+
+# Protected Backoffice routes - strictly gated by require_approved_user (JWT Bearer token)
+_backoffice = [Depends(require_approved_user)]
 app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"], dependencies=_backoffice)
 app.include_router(ingestion.router, prefix="/api/ingestion", tags=["Sandbox ingestion"], dependencies=_backoffice)
-# The webhook has its own check (inbound token or Backoffice key), see api.security.
+# The email webhook has its own check (inbound token or Backoffice key), see api.security.
 app.include_router(email.router, prefix="/api/email", tags=["Inbound email"])
 app.include_router(excel.router, prefix="/api/excel", tags=["Excel source of truth"], dependencies=_backoffice)
 app.include_router(regression.router, prefix="/api/regression", tags=["Regression Testing"], dependencies=_backoffice)
@@ -69,7 +76,7 @@ app.include_router(documents.router, prefix="/api/documents", tags=["Documents"]
 
 @app.get("/")
 async def root():
-    return {"message": "Welcome to GoldenCare Backoffice API"}
+    return {"message": "Welcome to BillingStream Backoffice API"}
 
 
 @app.get("/api/health")

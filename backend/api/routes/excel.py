@@ -51,7 +51,7 @@ async def download_workbook() -> FileResponse:
     path = get_excel_repository().file_path
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="קובץ האקסל טרם נוצר")
-    filename = f"GoldenCare_Master_{datetime.now():%Y-%m-%d_%H%M}.xlsx"
+    filename = f"BillingStream_Master_{datetime.now():%Y-%m-%d_%H%M}.xlsx"
     return FileResponse(path, media_type=_XLSX_MIME, filename=filename)
 
 

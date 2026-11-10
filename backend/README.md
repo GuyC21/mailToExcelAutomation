@@ -1,6 +1,6 @@
-# GoldenCare Backend API
+# BillingStream Backend API
 
-The backend of the GoldenCare system is a FastAPI Python application responsible for email ingestion, AI-driven data extraction, deterministic validation, and Excel synchronization.
+The backend of the BillingStream system is a FastAPI Python application responsible for email ingestion, AI-driven data extraction, deterministic validation, and Excel synchronization.
 
 ## Architecture & Services
 
@@ -10,7 +10,7 @@ The backend is organized into several key services:
 - **AI Extraction (`services/extraction/`)**: Uses Gemini (and falls back to OpenAI) to transcribe document contents into structured JSON.
   - **System Envelope**: The AI prompt is split in two. The "System Envelope" contains hardcoded instructions about the JSON contract and anti-hallucination rules. The "Business Prompt" is what the finance team edits in the UI.
 - **Business Validation (`services/validation/`)**: The AI is instructed to blindly transcribe what it sees. The validation layer then deterministically checks the math (e.g., does `Quantity * Unit Price == Line Total`? Does `Subtotal + VAT == Total`?). This prevents the AI from "fixing" a supplier's math error.
-- **Excel Sync (`services/excel_sync.py`)**: The database is the ultimate source of truth. This service projects the database records into the `GoldenCare_Master.xlsx` file. It ensures atomic writes and handles conflicts if the Excel file is open.
+- **Excel Sync (`services/excel_sync.py`)**: The database is the ultimate source of truth. This service projects the database records into the `BillingStream_Master.xlsx` file. It ensures atomic writes and handles conflicts if the Excel file is open.
 - **Email Parser (`services/email_parser.py`)**: Processes standard multi-part form data, JSON payloads, or raw `.eml` files from various webhook providers.
 
 ## API Structure
@@ -45,7 +45,7 @@ When a regression run is triggered, the **Runner**:
 This is the heart of the regression system. How do you programmatically compare two complex JSONs fairly? If the AI misreads one letter in a supplier name, the whole extraction shouldn't score 0%. The Scorer uses different strategies based on the *data type*:
 
 - **Text Fields (e.g., Supplier Name, Description)**: 
-  Uses a **Fuzzy Match (Levenshtein distance)**. If the expected name is "Golden Care" and the AI outputs "Golden Car", it gets a partial score (e.g., 90%) instead of a failure.
+  Uses a **Fuzzy Match (Levenshtein distance)**. If the expected name is "Billing Stream" and the AI outputs "Billing Strem", it gets a partial score (e.g., 90%) instead of a failure.
 - **Dates**: 
   Requires an **Exact Match**, as dates are already standardized to ISO format upstream.
 - **Identifiers (e.g., Supplier Tax ID, Document Number)**: 

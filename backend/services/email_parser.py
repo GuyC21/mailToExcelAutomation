@@ -51,7 +51,7 @@ def _ensure_identity(payload: InboundEmailPayload) -> InboundEmailPayload:
     """Stamps Message-ID / Date when a webhook omits them, for traceability."""
     payload.delivery_key = _delivery_key(payload)
     if not payload.message_id:
-        payload.message_id = make_msgid(domain="inbound.goldencare.local")
+        payload.message_id = make_msgid(domain="inbound.billingstream.local")
         payload.headers.setdefault("Message-ID", payload.message_id)
     if not payload.sent_at:
         payload.sent_at = format_datetime(datetime.now(timezone.utc))

@@ -13,7 +13,7 @@ PDF_BYTES = b"%PDF-1.4\n% fake test pdf\n"
 def _build_eml() -> bytes:
     message = EmailMessage()
     message["From"] = "מדי-פארם הנהלת חשבונות <billing@medipharm-care.co.il>"
-    message["To"] = "invoices@goldencare.co.il"
+    message["To"] = "invoices@billingstream.co.il"
     message["Subject"] = "טופס התחשבנות אוגוסט 2026"
     message["Message-ID"] = "<abc123@medipharm-care.co.il>"
     message["Date"] = "Tue, 15 Sep 2026 09:12:00 +0300"
@@ -29,7 +29,7 @@ def test_eml_decodes_hebrew_headers_body_and_attachment():
     assert payload.message_id == "<abc123@medipharm-care.co.il>"
     assert "מצורף טופס" in payload.body_text
     assert [(a.filename, a.content) for a in payload.attachments] == [("טופס התחשבנות.pdf", PDF_BYTES)]
-    assert payload.headers["To"] == "invoices@goldencare.co.il"
+    assert payload.headers["To"] == "invoices@billingstream.co.il"
 
 
 def test_eml_rejects_garbage():
