@@ -2,7 +2,7 @@ import { useState } from 'react';
 import FilePicker from './FilePicker';
 
 const DEFAULT_EMAIL = {
-  from: 'מדי-פארם הנהלת חשבונות <billing@medipharm-care.co.il>',
+  from: 'Email',
   to: 'invoices@billingstream.co.il',
   subject: 'טופס התחשבנות ספק – אוגוסט 2026',
   text: 'שלום רב,\nמצורף טופס ההתחשבנות לחודש אוגוסט 2026.\nנודה לאישור קבלה.\n\nבברכה,\nהנהלת חשבונות',
