@@ -6,6 +6,7 @@ import EmailPayloadCard from '../components/sandbox/EmailPayloadCard';
 import ExtractionResultCard from '../components/sandbox/ExtractionResultCard';
 import ResultsPlaceholder from '../components/sandbox/ResultsPlaceholder';
 import ExcelPreviewPanel from '../components/sandbox/ExcelPreviewPanel';
+import BYOKStatusBadge from '../components/byok/BYOKStatusBadge';
 import { useIngestion } from '../hooks/useIngestion';
 import { useEmailInbound } from '../hooks/useEmailInbound';
 import { useExcelPreview } from '../hooks/useExcelPreview';
@@ -39,17 +40,24 @@ const SandboxPage = () => {
   };
 
   return (
-    <div className="w-full">
-      <header className="mb-6 bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
-        <h1 className="text-2xl md:text-3xl font-bold text-blue-900">טסטר חילוץ נתונים (Sandbox)</h1>
-        <p className="text-gray-500 mt-1 text-sm md:text-base">
-          הדמיה מלאה של התהליך: מייל מספק נכנס ← ה-AI מחלץ ובודק את הטופס ← השורה נוספת לקובץ האקסל.
-        </p>
+    <div className="w-full max-w-full overflow-hidden">
+      <header className="mb-[1.5rem] bg-white p-[1rem] sm:p-[1.25rem] md:p-[1.5rem] rounded-xl shadow-xs border border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-[0.75rem]">
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[clamp(1.15rem,3.8vw,1.75rem)] font-bold text-blue-900 leading-snug">
+            טסטר חילוץ נתונים (Sandbox)
+          </h1>
+          <p className="text-gray-500 mt-[0.25rem] text-[clamp(0.75rem,2.2vw,0.875rem)] leading-relaxed">
+            הדמיה מלאה של התהליך: מייל מספק נכנס ← ה-AI מחלץ ובודק את הטופס ← השורה נוספת לקובץ האקסל.
+          </p>
+        </div>
+        <div className="flex-shrink-0 self-start sm:self-auto">
+          <BYOKStatusBadge />
+        </div>
       </header>
 
       <ModeTabs mode={mode} onChange={setMode} disabled={isRunning} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 items-start gap-6 mb-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 items-start gap-[1rem] sm:gap-[1.5rem] mb-[1.5rem] w-full max-w-full">
         <div className="lg:col-span-5">
           {mode === 'email' ? (
             <EmailComposer

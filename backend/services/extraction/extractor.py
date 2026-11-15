@@ -73,6 +73,23 @@ def _strip_fences(text: str) -> str:
     return cleaned.strip()
 
 
+def mask_api_key(key: Optional[str]) -> str:
+    """Masks an API key for safe logging, exposing only prefix and suffix.
+
+    Args:
+        key: Raw API key string.
+
+    Returns:
+        A masked string like 'AIzaSy...7890' or '(empty)'.
+    """
+    if not key or not key.strip():
+        return "(empty)"
+    s = key.strip()
+    if len(s) <= 8:
+        return "***"
+    return f"{s[:6]}...{s[-4:]}"
+
+
 class DocumentExtractor:
     """Runs a document through the configured provider chain."""
 
@@ -101,6 +118,43 @@ class DocumentExtractor:
         ]
         configured = [p for p in real if p.is_configured()]
         return cls(configured or [MockProvider()])
+
+    @classmethod
+    def create_scoped(
+        cls,
+        settings: Optional[Settings] = None,
+        user_gemini_key: Optional[str] = None,
+        user_openai_key: Optional[str] = None,
+    ) -> "DocumentExtractor":
+        """Builds a scoped extractor honoring user BYOK keys.
+
+        Strict 2-tier security rule:
+        If user BYOK keys are provided, configure the extractor using ONLY those keys.
+        If NO user keys are provided, fall back directly to MockProvider() so that
+        the author's server-side quota is never consumed by guest/demo users.
+
+        Args:
+            settings: Optional explicit settings; defaults to global settings for model lists.
+            user_gemini_key: Ephemeral Gemini key provided in request headers.
+            user_openai_key: Ephemeral OpenAI key provided in request headers.
+
+        Returns:
+            DocumentExtractor instance tailored for the current request.
+        """
+        settings = settings or get_settings()
+        gemini_k = (user_gemini_key or "").strip()
+        openai_k = (user_openai_key or "").strip()
+
+        providers: List[ExtractionProvider] = []
+        if gemini_k:
+            providers.append(GeminiProvider(gemini_k, settings.gemini_model_chain))
+        if openai_k:
+            providers.append(OpenAIProvider(openai_k, settings.openai_model))
+
+        if not providers:
+            return cls([MockProvider()])
+
+        return cls(providers)
 
     @property
     def provider_names(self) -> List[str]:

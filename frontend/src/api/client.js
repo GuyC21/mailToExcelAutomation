@@ -64,6 +64,21 @@ export function authHeaders(headers = {}) {
   if (API_KEY) {
     merged['X-API-Key'] = API_KEY;
   }
+
+  // Attach ephemeral BYOK keys from sessionStorage if present
+  try {
+    const geminiKey = sessionStorage.getItem('bs_byok_gemini');
+    const openaiKey = sessionStorage.getItem('bs_byok_openai');
+    if (geminiKey) {
+      merged['X-Gemini-API-Key'] = geminiKey.trim();
+    }
+    if (openaiKey) {
+      merged['X-OpenAI-API-Key'] = openaiKey.trim();
+    }
+  } catch {
+    // Ignore sessionStorage access errors (e.g. strict sandbox/privacy modes)
+  }
+
   return merged;
 }
 

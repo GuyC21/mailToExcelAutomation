@@ -8,6 +8,7 @@ facilitating testing and prompt engineering without affecting the main inbox.
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.dependencies.byok import BYOKCredentials, get_byok_credentials
 from api.uploads import MB, read_upload_or_413
 from config import get_settings
 from database import get_db
@@ -19,7 +20,11 @@ router = APIRouter()
 
 
 @router.post("/upload", response_model=IngestionResult)
-async def ingest_sample(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)) -> IngestionResult:
+async def ingest_sample(
+    file: UploadFile = File(...),
+    byok: BYOKCredentials = Depends(get_byok_credentials),
+    db: AsyncSession = Depends(get_db),
+) -> IngestionResult:
     """Runs a single uploaded PDF or image through the production pipeline.
 
     The result is written to the Excel source of truth (channel = sandbox) so
@@ -28,6 +33,7 @@ async def ingest_sample(file: UploadFile = File(...), db: AsyncSession = Depends
 
     Args:
         file (UploadFile): The document file (PDF or image) uploaded by the user.
+        byok (BYOKCredentials): Ephemeral API keys injected from request headers.
         db (AsyncSession): The database session dependency.
 
     Returns:
@@ -40,7 +46,13 @@ async def ingest_sample(file: UploadFile = File(...), db: AsyncSession = Depends
     """
     content = await read_upload_or_413(file, get_settings().max_upload_mb * MB)
     try:
-        return await ingest_document(db, filename=file.filename or "document", content=content, channel="sandbox")
+        return await ingest_document(
+            db,
+            filename=file.filename or "document",
+            content=content,
+            channel="sandbox",
+            extractor=byok.get_extractor(),
+        )
     except UnsupportedDocumentError as error:
         raise HTTPException(status_code=415, detail=str(error)) from error
     except NoActivePromptError as error:

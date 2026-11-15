@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from api.dependencies.byok import BYOKCredentials, get_byok_credentials
 from api.uploads import MB, read_upload_or_413
 from config import get_settings
 from database import get_db
@@ -65,6 +66,7 @@ class RegressionResponse(BaseModel):
 @router.post("/run", response_model=RegressionResponse)
 async def run_regression_suite(
     prompt_id: Optional[int] = Query(None, description="Prompt version to evaluate; defaults to the active prompt."),
+    byok: BYOKCredentials = Depends(get_byok_credentials),
     db: AsyncSession = Depends(get_db),
 ) -> RegressionResponse:
     """Runs the regression suite with a specific prompt version and returns the scored report.
@@ -75,6 +77,7 @@ async def run_regression_suite(
 
     Args:
         prompt_id (Optional[int]): The prompt version to evaluate. Defaults to the active prompt.
+        byok (BYOKCredentials): Ephemeral API keys injected from request headers.
         db (AsyncSession): The database session dependency.
 
     Returns:
@@ -94,9 +97,12 @@ async def run_regression_suite(
             raise HTTPException(status_code=409, detail="אין פרומפט פעיל. יש לבחור פרומפט להרצה.")
 
     try:
-        runner = RegressionRunner.from_settings(
+        runner = RegressionRunner.create_scoped(
+            user_gemini_key=byok.gemini_api_key,
+            user_openai_key=byok.openai_api_key,
             business_prompt=prompt.content,
-            prompt_info={"id": prompt.id, "name": prompt.name, "is_active": bool(prompt.is_active)})
+            prompt_info={"id": prompt.id, "name": prompt.name, "is_active": bool(prompt.is_active)},
+        )
     except RegressionProviderUnavailableError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     try:
