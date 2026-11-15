@@ -8,8 +8,10 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { BYOKProvider } from './context/BYOKContext';
 import Topbar from './components/layout/Topbar';
 import Footer from './components/layout/Footer';
+import BYOKModal from './components/byok/BYOKModal';
 import ProtectedRoute from './components/auth/ProtectedRoute';
 import AdminRoute from './components/auth/AdminRoute';
 
@@ -34,10 +36,12 @@ import ReviewPage from './pages/ReviewPage';
 function App() {
   return (
     <AuthProvider>
-      <div className="min-h-screen bg-gray-50 flex flex-col font-sans" dir="rtl">
-        <Topbar />
+      <BYOKProvider>
+        <div className="min-h-screen bg-gray-50 flex flex-col font-sans w-full max-w-[100vw] overflow-x-hidden" dir="rtl">
+          <Topbar />
+          <BYOKModal />
 
-        <main className="flex-1 w-full max-w-7xl mx-auto p-4 md:p-8 flex flex-col items-center justify-start gap-8">
+          <main className="flex-1 w-full max-w-7xl mx-auto p-[0.75rem] sm:p-[1rem] md:p-[1.5rem] lg:p-[2rem] flex flex-col items-center justify-start gap-[1rem] sm:gap-[1.5rem] md:gap-[2rem] overflow-x-hidden">
           <Routes>
             {/* Public Authentication Screens */}
             <Route path="/login" element={<LoginPage />} />
@@ -112,7 +116,8 @@ function App() {
 
         <Footer />
       </div>
-    </AuthProvider>
+    </BYOKProvider>
+  </AuthProvider>
   );
 }
 

@@ -8,7 +8,10 @@ import logging
 import time
 from typing import Any, List, Optional
 
-import google.generativeai as genai
+try:
+    import google.generativeai as genai
+except ImportError:  # pragma: no cover
+    genai = None
 
 from services.extraction.providers.base import (
     ExtractionProvider,
@@ -93,16 +96,16 @@ class GeminiProvider(ExtractionProvider):
         """
         self._api_key = (api_key or "").strip()
         self._models = models
-        if self._api_key:
+        if self._api_key and genai is not None:
             genai.configure(api_key=self._api_key)
 
     def is_configured(self) -> bool:
         """Checks if the Gemini API key is configured.
 
         Returns:
-            True if the API key is present, False otherwise.
+            True if the API key is present and SDK is available, False otherwise.
         """
-        return bool(self._api_key)
+        return bool(self._api_key and genai is not None)
 
     def extract(self, system_prompt: str, file_path: str, mime_type: str) -> ProviderResponse:
         """Extracts JSON data from the document using Gemini models.
@@ -118,6 +121,8 @@ class GeminiProvider(ExtractionProvider):
         Raises:
             ProviderError: If all configured models fail to process the document.
         """
+        if genai is None:
+            raise ProviderError("חבילת google-generativeai אינה מותקנת בסביבה זו", [])
         uploaded = _upload_with_retry(file_path, mime_type)
         attempts: List[dict] = []
         try:

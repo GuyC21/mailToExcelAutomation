@@ -14,6 +14,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
+import BYOKStatusBadge from '../byok/BYOKStatusBadge';
 
 /**
  * Base navigation routes available to all authenticated and approved users.
@@ -127,22 +128,22 @@ export default function Topbar() {
   const roleLabel = isAdmin ? 'מנהל מערכת' : 'משתמש מאושר';
 
   return (
-    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-xs w-full" dir="rtl">
-      {/* Top Header Bar (Height: 4rem / 64px) */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 xl:px-8 w-full">
-        <div className="flex items-center justify-between h-16 w-full">
+    <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-xs w-full max-w-[100vw] overflow-x-hidden" dir="rtl">
+      {/* Top Header Bar (Height: 3.75rem / 4rem) */}
+      <div className="max-w-7xl mx-auto px-[0.75rem] sm:px-[1.25rem] xl:px-[2rem] w-full">
+        <div className="flex items-center justify-between h-[3.75rem] sm:h-[4rem] w-full gap-[0.5rem]">
           
-          {/* Right Section: Brand Logo */}
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <NavLink to="/dashboard" onClick={closeAllMenus} className="flex items-center gap-2.5 focus:outline-none">
-              <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-xs select-none flex-shrink-0">
+          {/* Right Section: Brand Logo (Adaptive relative units) */}
+          <div className="flex items-center gap-[0.5rem] sm:gap-[0.75rem] min-w-0 flex-shrink">
+            <NavLink to="/dashboard" onClick={closeAllMenus} className="flex items-center gap-[0.5rem] focus:outline-none min-w-0">
+              <div className="w-[2rem] h-[2rem] sm:w-[2.25rem] sm:h-[2.25rem] bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-[clamp(0.9rem,2.5vw,1.125rem)] shadow-xs select-none flex-shrink-0">
                 B
               </div>
-              <div className="flex flex-col">
-                <span className="font-bold text-base sm:text-lg text-blue-900 tracking-tight leading-tight whitespace-nowrap">
+              <div className="flex flex-col min-w-0">
+                <span className="font-bold text-[clamp(0.85rem,3.2vw,1.125rem)] text-blue-900 tracking-tight leading-tight whitespace-nowrap truncate">
                   BillingStream AI
                 </span>
-                <span className="text-[10px] text-gray-500 font-medium leading-none whitespace-nowrap">
+                <span className="hidden sm:inline-block text-[0.625rem] text-gray-500 font-medium leading-none whitespace-nowrap">
                   מערכת בקרה פיננסית
                 </span>
               </div>
@@ -151,13 +152,13 @@ export default function Topbar() {
 
           {/* Center Section: Desktop Navigation Links (Visible only on xl: screens 1280px+) */}
           {isAuthenticated && (
-            <div className="hidden xl:flex items-center gap-1.5 flex-1 justify-center px-4">
+            <div className="hidden xl:flex items-center gap-[0.35rem] flex-1 justify-center px-[1rem]">
               {navItems.map((item) => (
                 <NavLink
                   key={item.id}
                   to={item.path}
                   onClick={closeAllMenus}
-                  className="px-3.5 py-2 rounded-xl text-sm font-medium text-gray-700 transition-all duration-150 whitespace-nowrap hover:bg-blue-100 hover:text-blue-900 hover:font-bold"
+                  className="px-[0.75rem] py-[0.5rem] rounded-xl text-[0.875rem] font-medium text-gray-700 transition-all duration-150 whitespace-nowrap hover:bg-blue-100 hover:text-blue-900 hover:font-bold"
                 >
                   {item.label}
                 </NavLink>
@@ -165,8 +166,13 @@ export default function Topbar() {
             </div>
           )}
 
-          {/* Left Section: Desktop Profile & Mobile Trigger */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Left Section: BYOK Badge (Desktop/Tablet), Desktop Profile & Mobile Trigger */}
+          <div className="flex items-center gap-[0.5rem] sm:gap-[0.75rem] flex-shrink-0">
+            {isAuthenticated && (
+              <div className="hidden md:flex">
+                <BYOKStatusBadge />
+              </div>
+            )}
             {isAuthenticated ? (
               <>
                 {/* Desktop User Dropdown (Visible on xl: screens 1280px+) */}
@@ -174,18 +180,18 @@ export default function Topbar() {
                   <button
                     type="button"
                     onClick={() => setIsUserDropdownOpen((prev) => !prev)}
-                    className="flex items-center gap-2.5 py-1.5 px-2.5 rounded-xl border border-gray-200 hover:bg-gray-50 transition focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    className="flex items-center gap-[0.625rem] py-[0.375rem] px-[0.625rem] rounded-xl border border-gray-200 hover:bg-gray-50 transition focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     aria-expanded={isUserDropdownOpen}
                     aria-label="תפריט משתמש"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold select-none">
+                    <div className="w-[2rem] h-[2rem] rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-[0.75rem] font-bold select-none">
                       {userInitial}
                     </div>
                     <div className="text-right">
-                      <div className="text-xs font-bold text-gray-800 leading-tight truncate max-w-[120px]">
+                      <div className="text-[0.75rem] font-bold text-gray-800 leading-tight truncate max-w-[7.5rem]">
                         {displayName}
                       </div>
-                      <div className="text-[10px] text-gray-400 leading-none">
+                      <div className="text-[0.625rem] text-gray-400 leading-none">
                         {roleLabel}
                       </div>
                     </div>
@@ -193,13 +199,13 @@ export default function Topbar() {
 
                   {/* Dropdown Menu Popover */}
                   {isUserDropdownOpen && (
-                    <div className="absolute left-0 mt-2 w-64 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50 text-right">
-                      <div className="px-4 py-2.5 border-b border-gray-100">
-                        <div className="text-sm font-bold text-gray-900 truncate">{displayName}</div>
-                        <div className="text-xs text-gray-500 truncate mt-0.5">{user?.email}</div>
-                        <div className="mt-2">
+                    <div className="absolute left-0 mt-[0.5rem] w-[16rem] bg-white rounded-xl shadow-lg border border-gray-100 py-[0.5rem] z-50 text-right">
+                      <div className="px-[1rem] py-[0.625rem] border-b border-gray-100">
+                        <div className="text-[0.875rem] font-bold text-gray-900 truncate">{displayName}</div>
+                        <div className="text-[0.75rem] text-gray-500 truncate mt-[0.125rem]">{user?.email}</div>
+                        <div className="mt-[0.5rem]">
                           <span
-                            className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                            className={`inline-block text-[0.6875rem] font-semibold px-[0.5rem] py-[0.125rem] rounded-full ${
                               isAdmin
                                 ? 'bg-purple-50 text-purple-700 border border-purple-200'
                                 : 'bg-blue-50 text-blue-700 border border-blue-200'
@@ -210,11 +216,11 @@ export default function Topbar() {
                         </div>
                       </div>
 
-                      <div className="p-1.5">
+                      <div className="p-[0.375rem]">
                         <button
                           type="button"
                           onClick={handleLogout}
-                          className="w-full text-right px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 rounded-lg transition"
+                          className="w-full text-right px-[0.75rem] py-[0.5rem] text-[0.75rem] font-semibold text-red-600 hover:bg-red-50 rounded-lg transition"
                         >
                           התנתק מהמערכת
                         </button>
@@ -224,14 +230,14 @@ export default function Topbar() {
                 </div>
 
                 {/* Mobile / Tablet Menu Trigger Button (Visible on screens < 1280px, including iPads) */}
-                <div className="flex items-center gap-2 xl:hidden">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-xs font-bold select-none">
+                <div className="flex items-center gap-[0.35rem] sm:gap-[0.5rem] xl:hidden">
+                  <div className="w-[1.85rem] h-[1.85rem] sm:w-[2rem] sm:h-[2rem] rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-[0.75rem] font-bold select-none flex-shrink-0">
                     {userInitial}
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsMobileMenuOpen((prev) => !prev)}
-                    className={`px-3.5 py-1.5 rounded-lg border text-xs font-bold transition shadow-xs ${
+                    className={`px-[0.65rem] sm:px-[0.85rem] py-[0.35rem] rounded-lg border text-[clamp(0.7rem,2vw,0.75rem)] font-bold transition shadow-xs whitespace-nowrap ${
                       isMobileMenuOpen
                         ? 'bg-gray-800 text-white border-gray-800'
                         : 'bg-white text-gray-800 border-gray-300 hover:bg-gray-100 active:bg-gray-200'
@@ -314,6 +320,14 @@ export default function Topbar() {
                 {roleLabel}
               </span>
             </div>
+          </div>
+        )}
+
+        {/* Mobile BYOK Quick Access */}
+        {isAuthenticated && (
+          <div className="px-4 py-3 bg-gray-100/60 border-b border-gray-200 flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">ספק AI ומפתח פעיל:</span>
+            <BYOKStatusBadge />
           </div>
         )}
 

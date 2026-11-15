@@ -266,6 +266,48 @@ class RegressionRunner:
                 "בדיקות רגרסיה דורשות ספק AI אמיתי – יש להגדיר GEMINI_API_KEY או OPENAI_API_KEY")
         return cls(DocumentExtractor([provider]), **kwargs)
 
+    @classmethod
+    def create_scoped(
+        cls,
+        user_gemini_key: Optional[str] = None,
+        user_openai_key: Optional[str] = None,
+        **kwargs,
+    ) -> "RegressionRunner":
+        """Builds a regression runner using ephemeral BYOK credentials.
+
+        Strict 2-tier enforcement:
+        If user provided a personal key, runs the suite with their key.
+        If no user key is provided, refuses to run and instructs the user to configure
+        their personal key, preventing silent fallback to host quotas.
+
+        Args:
+            user_gemini_key: Ephemeral Gemini key provided in headers.
+            user_openai_key: Ephemeral OpenAI key provided in headers.
+            **kwargs: Extra arguments passed to cls constructor.
+
+        Returns:
+            RegressionRunner instance pinned to the user's provider.
+
+        Raises:
+            RegressionProviderUnavailableError: If no personal key was supplied.
+        """
+        gemini_k = (user_gemini_key or "").strip()
+        openai_k = (user_openai_key or "").strip()
+        settings = get_settings()
+
+        providers = []
+        if gemini_k:
+            providers.append(GeminiProvider(gemini_k, settings.gemini_model_chain))
+        elif openai_k:
+            providers.append(OpenAIProvider(openai_k, settings.openai_model))
+
+        if not providers:
+            raise RegressionProviderUnavailableError(
+                "הרצת בדיקות רגרסיה דורשת ספק AI אמיתי. יש להזין מפתח אישי (Google Gemini או OpenAI) דרך תפריט ה-BYOK בראש המסך."
+            )
+
+        return cls(DocumentExtractor(providers), **kwargs)
+
     async def run(self, suite_dir: Optional[Union[Path, str]] = None) -> RegressionReport:
         """Runs every case in ``suite_dir`` (default: ``default_suite_dir()``) and
         returns the aggregate report."""

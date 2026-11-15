@@ -44,7 +44,8 @@ def get_extractor() -> DocumentExtractor:
 
 async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, channel: str,
                           email: Optional[InboundEmail] = None,
-                          claim_key: Optional[str] = None) -> IngestionResult:
+                          claim_key: Optional[str] = None,
+                          extractor: Optional[DocumentExtractor] = None) -> IngestionResult:
     """Processes one document and records the outcome, whatever it is.
 
     This function represents the core ingestion flow. It extracts data from the document
@@ -61,6 +62,8 @@ async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, ch
         claim_key (Optional[str]): Idempotency claim to complete in the same
             commit as the record (email channel), so the record and its claim
             can never disagree.
+        extractor (Optional[DocumentExtractor]): Optional request-scoped extractor
+            honoring BYOK credentials. If omitted, falls back to the default extractor.
 
     Returns:
         IngestionResult: The result of the ingestion process, including extraction data,
@@ -74,7 +77,8 @@ async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, ch
     if not prompt:
         raise NoActivePromptError("אין פרומפט פעיל. יש להפעיל פרומפט במסך ניהול הפרומפטים.")
     stored = store_document(filename, content)
-    outcome = await get_extractor().extract(prompt.content, stored.stored_path, stored.mime_type)
+    active_extractor = extractor or get_extractor()
+    outcome = await active_extractor.extract(prompt.content, stored.stored_path, stored.mime_type)
 
     settings = get_settings()
     if outcome.succeeded:

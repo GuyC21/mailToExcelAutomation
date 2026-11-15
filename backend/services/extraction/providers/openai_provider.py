@@ -7,7 +7,10 @@ import base64
 import os
 from typing import Dict, Any
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover
+    OpenAI = None
 
 from services.extraction.providers.base import (
     ExtractionProvider,
@@ -38,9 +41,9 @@ class OpenAIProvider(ExtractionProvider):
         """Checks if the OpenAI API key is configured.
 
         Returns:
-            True if the API key is present, False otherwise.
+            True if the API key is present and SDK is available, False otherwise.
         """
-        return bool(self._api_key)
+        return bool(self._api_key and OpenAI is not None)
 
     def extract(self, system_prompt: str, file_path: str, mime_type: str) -> ProviderResponse:
         """Extracts JSON data from the document using the OpenAI API.
@@ -56,6 +59,8 @@ class OpenAIProvider(ExtractionProvider):
         Raises:
             ProviderError: If the OpenAI model fails to process the document.
         """
+        if OpenAI is None:
+            raise ProviderError("חבילת openai אינה מותקנת בסביבה זו", [])
         try:
             client = OpenAI(api_key=self._api_key)
             response = client.chat.completions.create(
