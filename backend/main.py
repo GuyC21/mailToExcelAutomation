@@ -23,11 +23,32 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("billingstream")
 
 
+def _sync_audit_schema(sync_conn) -> None:
+    """Ensures audit columns exist on document_ingestions for existing databases.
+
+    Because SQLAlchemy's Base.metadata.create_all only creates new tables and
+    does not alter pre-existing tables, this inspects the live schema and adds
+    missing columns dynamically without dropping existing data.
+
+    Args:
+        sync_conn: Synchronous database connection provided by SQLAlchemy run_sync.
+    """
+    from sqlalchemy import inspect, text
+    inspector = inspect(sync_conn)
+    if "document_ingestions" in inspector.get_table_names():
+        existing_cols = {col["name"] for col in inspector.get_columns("document_ingestions")}
+        if "updated_at" not in existing_cols:
+            sync_conn.execute(text("ALTER TABLE document_ingestions ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE;"))
+        if "updated_by_id" not in existing_cols:
+            sync_conn.execute(text("ALTER TABLE document_ingestions ADD COLUMN updated_by_id VARCHAR(36);"))
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     # create_all is fine for this demo; production would use Alembic migrations.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_sync_audit_schema)
 
     from scripts.seed import seed_db
     await seed_db()

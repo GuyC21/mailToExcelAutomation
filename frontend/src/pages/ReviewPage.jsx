@@ -1,12 +1,42 @@
+/**
+ * Invoice Review & Manual Validation Page (ReviewPage).
+ * 
+ * Enables finance operators to inspect ingested documents, cross-check AI-extracted fields
+ * against the original invoice preview, manually correct values, and record reviewer
+ * attribution (who approved/altered the invoice and when) with live Excel synchronization.
+ * 
+ * @component
+ * @returns {JSX.Element}
+ */
 import React, { useEffect, useState } from 'react';
 import { useDocuments } from '../hooks/useDocuments';
 import DocumentPreview from '../components/labeling/DocumentPreview';
-import { AlertCircle, CheckCircle, Trash2, Clock, Search } from 'lucide-react';
+import { AlertCircle, CheckCircle, Trash2, Clock, Search, UserCheck, Bot } from 'lucide-react';
 
 const STATUS_MAP = {
   VALID: { label: 'תקין', color: 'text-green-600 bg-green-50' },
   NEEDS_REVIEW: { label: 'דורש בדיקה', color: 'text-yellow-600 bg-yellow-50' },
   EXTRACTION_FAILED: { label: 'חילוץ נכשל', color: 'text-red-600 bg-red-50' }
+};
+
+/**
+ * Formats an ISO datetime string into readable Hebrew localized date and time.
+ * @param {string} dateStr 
+ * @returns {string}
+ */
+const formatAuditDate = (dateStr) => {
+  if (!dateStr) return '';
+  try {
+    return new Date(dateStr).toLocaleString('he-IL', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return dateStr;
+  }
 };
 
 export default function ReviewPage() {
@@ -34,17 +64,19 @@ export default function ReviewPage() {
   const handleSave = async (newStatus) => {
     try {
       setSaveStatus({ type: 'loading' });
-      await updateDocument(selectedDoc.id, {
+      const res = await updateDocument(selectedDoc.id, {
         extracted_data: formData,
         status: newStatus
       });
       setSaveStatus({ type: 'success', message: 'נשמר בהצלחה והאקסל עודכן!' });
       
-      // Update selected doc locally
+      // Update selected doc locally with server-assigned reviewer attribution
+      const serverDoc = res?.document || {};
       setSelectedDoc(prev => ({
         ...prev,
         extracted_data: formData,
-        status: newStatus
+        status: newStatus,
+        ...serverDoc
       }));
     } catch (err) {
       setSaveStatus({ type: 'error', message: err.message });
@@ -112,6 +144,14 @@ export default function ReviewPage() {
                     <span className="truncate max-w-[120px]">{doc.extracted_data?.supplier_name || 'ספק לא ידוע'}</span>
                     <span>₪{doc.extracted_data?.total_amount || '0'}</span>
                   </div>
+                  {doc.updated_by && (
+                    <div className="text-[11px] text-blue-700 mt-1.5 flex items-center gap-1 font-medium">
+                      <UserCheck className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                      <span className="truncate max-w-[170px]">
+                        {doc.updated_by.full_name || doc.updated_by.email}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -144,6 +184,34 @@ export default function ReviewPage() {
                   <Trash2 className="w-5 h-5" />
                 </button>
               </div>
+
+              {/* Reviewer Audit Attribution Badge */}
+              {selectedDoc.updated_by ? (
+                <div className="bg-blue-50/80 border border-blue-200/90 rounded-lg p-3 text-xs text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1 bg-blue-100 rounded-full text-blue-700">
+                      <UserCheck className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <span className="text-gray-500">נערך ע״י: </span>
+                      <span className="font-semibold text-blue-900">{selectedDoc.updated_by.full_name || selectedDoc.updated_by.email}</span>
+                      {selectedDoc.updated_by.full_name && selectedDoc.updated_by.email && (
+                        <span className="text-gray-400 text-[11px] block sm:inline sm:mr-1">({selectedDoc.updated_by.email})</span>
+                      )}
+                    </div>
+                  </div>
+                  {selectedDoc.updated_at && (
+                    <span className="text-blue-700 font-mono text-[11px] self-end sm:self-auto bg-blue-100/60 px-2 py-0.5 rounded">
+                      {formatAuditDate(selectedDoc.updated_at)}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-xs text-gray-500 flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-gray-400" />
+                  <span>קליטה אוטומטית (טרם נערך ידנית)</span>
+                </div>
+              )}
 
               {selectedDoc.issues && selectedDoc.issues.length > 0 && (
                 <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-lg text-sm text-yellow-800">

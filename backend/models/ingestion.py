@@ -55,5 +55,20 @@ class DocumentIngestion(Base):
     error = Column(Text)
     excel_synced = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # Human-in-the-loop reviewer attribution: tracks who modified or verified the document
+    updated_at = Column(
+        DateTime(timezone=True),
+        onupdate=func.now(),
+        nullable=True,
+        comment="UTC timestamp of the latest manual review or modification",
+    )
+    updated_by_id = Column(
+        String(36),
+        ForeignKey("user_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="UUID of the user who performed the latest manual review or modification",
+    )
 
     email = relationship("InboundEmail", back_populates="documents", lazy="joined")
+    updated_by = relationship("UserProfile", foreign_keys=[updated_by_id], lazy="joined")
