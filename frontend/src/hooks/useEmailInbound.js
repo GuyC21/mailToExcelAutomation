@@ -50,14 +50,19 @@ export function useEmailInbound() {
     form.append('text', email.text);
     form.append('headers', 'X-Mailer: BillingStream Backoffice Simulator\nX-Priority: 3');
     email.files.forEach((file) => form.append('attachments', file));
-    return send('/api/email/inbound', form);
+    // Dispatches strictly to the Sandbox simulation route (BYOK-enforced)
+    return send('/api/email/simulate', form);
   };
 
-  /** @param {File} file - a raw RFC 822 message (.eml) */
+  /** 
+   * Sends a raw RFC 822 message (.eml) to the simulation route.
+   * @param {File} file - a raw RFC 822 message (.eml)
+   */
   const sendEmlFile = (file) => {
     const form = new FormData();
     form.append('file', file);
-    return send('/api/email/inbound/eml', form);
+    // Dispatches strictly to the Sandbox simulation route (BYOK-enforced)
+    return send('/api/email/simulate/eml', form);
   };
 
   const reset = () => {

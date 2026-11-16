@@ -12,7 +12,18 @@ import models.prompt  # noqa: F401
 import models.regression  # noqa: F401 (registers RegressionRun for Run History)
 import models.user  # noqa: F401 (registers UserProfile with Base.metadata)
 from api.dependencies.auth import require_approved_user
-from api.routes import auth, dashboard, documents, email, excel, ingestion, llm, prompts, regression
+from api.routes import (
+    auth,
+    dashboard,
+    documents,
+    email,
+    email_simulation,
+    excel,
+    ingestion,
+    llm,
+    prompts,
+    regression,
+)
 from api.uploads import MB, BodySizeLimitMiddleware
 from config import get_settings
 from database import Base, async_session, engine
@@ -87,9 +98,11 @@ app.include_router(auth.router, prefix="/api", tags=["Auth & Admin"])
 _backoffice = [Depends(require_approved_user)]
 app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"], dependencies=_backoffice)
 app.include_router(ingestion.router, prefix="/api/ingestion", tags=["Sandbox ingestion"], dependencies=_backoffice)
+# Sandbox email simulation (strictly bound to BYOK and user session)
+app.include_router(email_simulation.router, prefix="/api/email", tags=["Sandbox Simulation"], dependencies=_backoffice)
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM & BYOK"], dependencies=_backoffice)
-# The email webhook has its own check (inbound token or Backoffice key), see api.security.
-app.include_router(email.router, prefix="/api/email", tags=["Inbound email"])
+# Production inbound email webhook (gated by X-Inbound-Token, uses Server API Key)
+app.include_router(email.router, prefix="/api/email", tags=["Production Inbound Email"])
 app.include_router(excel.router, prefix="/api/excel", tags=["Excel source of truth"], dependencies=_backoffice)
 app.include_router(regression.router, prefix="/api/regression", tags=["Regression Testing"], dependencies=_backoffice)
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"], dependencies=_backoffice)

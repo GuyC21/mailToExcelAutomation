@@ -117,7 +117,11 @@ async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, ch
     )
 
 
-async def ingest_email(db: AsyncSession, payload: InboundEmailPayload) -> tuple[InboundEmail, List[IngestionResult]]:
+async def ingest_email(
+    db: AsyncSession,
+    payload: InboundEmailPayload,
+    extractor: Optional[DocumentExtractor] = None,
+) -> tuple[InboundEmail, List[IngestionResult]]:
     """Persists the email, then ingests every supported attachment.
 
     This ensures every inbound email is logged before processing its attachments,
@@ -126,8 +130,11 @@ async def ingest_email(db: AsyncSession, payload: InboundEmailPayload) -> tuple[
     rather than ignored, so the sender-side view stays complete and reflects reality.
 
     Args:
-        db (AsyncSession): The database session.
+        db (AsyncSession): The active asynchronous database session.
         payload (InboundEmailPayload): The parsed email payload.
+        extractor (Optional[DocumentExtractor]): Optional scoped extractor. When provided
+            (e.g. from Sandbox simulations), it strictly enforces user BYOK credentials.
+            When None (production webhook), falls back to the system-wide Server API Key.
 
     Returns:
         tuple[InboundEmail, List[IngestionResult]]: The persisted email record and
@@ -161,8 +168,15 @@ async def ingest_email(db: AsyncSession, payload: InboundEmailPayload) -> tuple[
             results.append(await _duplicate_result(db, name, prior_ingestion_id))
             continue
         try:
-            result = await ingest_document(db, filename=name, content=attachment.content,
-                                           channel="email", email=email, claim_key=key)
+            result = await ingest_document(
+                db,
+                filename=name,
+                content=attachment.content,
+                channel="email",
+                email=email,
+                claim_key=key,
+                extractor=extractor,
+            )
         except UnsupportedDocumentError as error:
             await _release_claim(key)
             results.append(IngestionResult(filename=name, channel="email", status=STATUS_SKIPPED, error=str(error)))
