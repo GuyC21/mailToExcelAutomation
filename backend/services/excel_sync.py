@@ -63,7 +63,7 @@ def to_excel_record(row: DocumentIngestion) -> dict:
 
     We decouple the database schema from the Excel export format here to
     allow independent evolution of both. This prepares a flat dictionary
-    that easily maps to Excel columns.
+    that easily maps to Excel columns, including human reviewer attribution.
 
     Args:
         row (DocumentIngestion): The database ingestion record.
@@ -71,12 +71,21 @@ def to_excel_record(row: DocumentIngestion) -> dict:
     Returns:
         dict: A flattened dictionary representing a single Excel row.
     """
+    editor_name = None
+    if row.updated_by:
+        editor_name = row.updated_by.full_name or row.updated_by.email
+    elif row.updated_by_id == "system-api-key":
+        editor_name = "מערכת (API Key)"
+
     return {
         "ingestion_id": row.id,
         "ingested_at": _local_naive(row.created_at),
         "status": row.status,
         "issues": row.issues or [],
         "error": row.error,
+        "updated_by_id": row.updated_by_id,
+        "updated_by_name": editor_name,
+        "updated_at_local": _local_naive(row.updated_at) if row.updated_at else None,
         "channel": row.channel,
         "sender": row.email.sender if row.email else None,
         "subject": row.email.subject if row.email else None,

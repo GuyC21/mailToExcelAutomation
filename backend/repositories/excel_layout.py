@@ -50,6 +50,8 @@ DOCUMENT_COLUMNS: List[Column] = [
     Column("תאריך קליטה", 17, lambda r: r["ingested_at"], DATETIME),
     Column("סטטוס", 13, lambda r: STATUS_LABELS.get(r["status"], r["status"])),
     Column("בעיות שזוהו", 55, _issues_text),
+    Column("עורך אחרון", 22, lambda r: r.get("updated_by_name") or ("קליטה אוטומטית" if not r.get("updated_by_id") else r.get("updated_by_id"))),
+    Column("תאריך עריכה", 17, lambda r: r.get("updated_at_local"), DATETIME),
     Column("ערוץ", 12, lambda r: CHANNEL_LABELS.get(r["channel"], r["channel"])),
     Column("שולח", 28, lambda r: r.get("sender")),
     Column("נושא המייל", 30, lambda r: r.get("subject")),
