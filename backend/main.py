@@ -23,6 +23,7 @@ from api.routes import (
     llm,
     prompts,
     regression,
+    sandbox_status,
 )
 from api.uploads import MB, BodySizeLimitMiddleware
 from config import get_settings
@@ -52,6 +53,8 @@ def _sync_audit_schema(sync_conn) -> None:
             sync_conn.execute(text("ALTER TABLE document_ingestions ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE;"))
         if "updated_by_id" not in existing_cols:
             sync_conn.execute(text("ALTER TABLE document_ingestions ADD COLUMN updated_by_id VARCHAR(36);"))
+        if "created_by_id" not in existing_cols:
+            sync_conn.execute(text("ALTER TABLE document_ingestions ADD COLUMN created_by_id VARCHAR(36);"))
 
 
 @contextlib.asynccontextmanager
@@ -98,6 +101,8 @@ app.include_router(auth.router, prefix="/api", tags=["Auth & Admin"])
 _backoffice = [Depends(require_approved_user)]
 app.include_router(prompts.router, prefix="/api/prompts", tags=["Prompts"], dependencies=_backoffice)
 app.include_router(ingestion.router, prefix="/api/ingestion", tags=["Sandbox ingestion"], dependencies=_backoffice)
+# Sandbox job status polling (strictly scoped to the authenticated user's own jobs)
+app.include_router(sandbox_status.router, prefix="/api/sandbox", tags=["Sandbox Status"], dependencies=_backoffice)
 # Sandbox email simulation (strictly bound to BYOK and user session)
 app.include_router(email_simulation.router, prefix="/api/email", tags=["Sandbox Simulation"], dependencies=_backoffice)
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM & BYOK"], dependencies=_backoffice)

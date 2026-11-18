@@ -20,7 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies.auth import require_approved_user
 from api.dependencies.byok import BYOKCredentials, get_byok_credentials
-from api.uploads import UploadTooLargeError, read_upload_limited
+from api.uploads import MB, UploadTooLargeError, read_upload_limited
+from config import get_settings
 from database import get_db
 from models.user import UserProfile
 from schemas.email_payload import EmailAttachment, InboundEmailPayload
@@ -38,6 +39,7 @@ async def _process_simulation(
     db: AsyncSession,
     payload: InboundEmailPayload,
     byok: BYOKCredentials,
+    user_id: str,
 ) -> EmailIngestionResponse:
     """Internal helper to process a simulated email payload with strict BYOK credentials.
 
@@ -45,6 +47,7 @@ async def _process_simulation(
         db: Active asynchronous database session.
         payload: Parsed email payload containing headers and attachments.
         byok: Ephemeral user BYOK credentials extracted from request headers.
+        user_id: UUID of the authenticated user initiating the simulation.
 
     Returns:
         EmailIngestionResponse with email metadata and extraction results.
@@ -55,7 +58,7 @@ async def _process_simulation(
     try:
         # Strictly bound to byok.get_extractor(): Never falls back to server API key
         scoped_extractor = byok.get_extractor()
-        email, results = await ingest_email(db, payload, extractor=scoped_extractor)
+        email, results = await ingest_email(db, payload, extractor=scoped_extractor, user_id=user_id)
     except NoActivePromptError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -120,14 +123,33 @@ async def simulate_inbound_multipart(
     Raises:
         HTTPException: 400 for malformed content, 413 for oversized files.
     """
+    settings = get_settings()
+    if len(attachments) > settings.max_email_attachments:
+        raise HTTPException(
+            status_code=413,
+            detail=f"יותר מ-{settings.max_email_attachments} קבצים מצורפים במייל אחד",
+        )
+    per_file = settings.max_upload_mb * MB
+    files = []
+    for upload in attachments:
+        name, content_type = upload.filename or "attachment", upload.content_type or ""
+        try:
+            content = await read_upload_limited(upload, per_file)
+        except UploadTooLargeError as error:
+            # Reported per attachment (SKIPPED) so the email's other forms still process.
+            files.append(EmailAttachment(
+                filename=name, content_type=content_type, content=b"",
+                oversized=True, original_size=error.args[0],
+            ))
+            continue
+        files.append(EmailAttachment(filename=name, content_type=content_type, content=content))
+
     try:
-        payload = await parse_multipart(sender, to, subject, text, headers, attachments)
-    except UploadTooLargeError as error:
-        raise HTTPException(status_code=413, detail=str(error)) from error
+        payload = parse_multipart(sender, to, subject, text, headers, files)
     except EmailParseError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    return await _process_simulation(db, payload, byok)
+    return await _process_simulation(db, payload, byok, user_id=str(_user.id))
 
 
 @router.post(
@@ -165,4 +187,4 @@ async def simulate_inbound_eml(
     except EmailParseError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    return await _process_simulation(db, payload, byok)
+    return await _process_simulation(db, payload, byok, user_id=str(_user.id))

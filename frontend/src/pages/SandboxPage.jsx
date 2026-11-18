@@ -10,16 +10,20 @@ import BYOKStatusBadge from '../components/byok/BYOKStatusBadge';
 import { useIngestion } from '../hooks/useIngestion';
 import { useEmailInbound } from '../hooks/useEmailInbound';
 import { useExcelPreview } from '../hooks/useExcelPreview';
+import { useSandboxJob } from '../hooks/useSandboxJob';
 
 /**
  * SandboxPage Component
- * 
+ *
  * Orchestrates the end-to-end sandbox testing environment for data extraction.
- * This component intentionally holds no direct business logic or API calls; 
- * instead, it acts as a coordinator between the UI modes (Email vs Direct Upload) 
- * and delegates all I/O operations to custom hooks (`useIngestion`, `useEmailInbound`, `useExcelPreview`).
- * This separation ensures the UI remains declarative and easy to test.
- * 
+ * This component intentionally holds no direct business logic or API calls;
+ * instead, it acts as a coordinator between the UI modes (Email vs Direct Upload)
+ * and delegates all I/O operations to custom hooks.
+ *
+ * The `useSandboxJob` hook provides **resilient in-flight tracking**: if the user
+ * refreshes the browser while extraction is running, the hook re-discovers the
+ * PROCESSING job from the backend and keeps the spinner visible until it completes.
+ *
  * @component
  * @returns {JSX.Element} The rendered Sandbox page.
  */
@@ -28,12 +32,30 @@ const SandboxPage = () => {
   const upload = useIngestion();
   const inbound = useEmailInbound();
   const excel = useExcelPreview();
+  const sandboxJob = useSandboxJob();
 
-  const isRunning = upload.isUploading || inbound.isSending;
-  const results = mode === 'email' ? inbound.response?.results || [] : upload.result ? [upload.result] : [];
+  // A job is "running" if either hook is actively sending OR the backend
+  // reports a surviving PROCESSING record from before this page load.
+  const isRunning = upload.isUploading || inbound.isSending || sandboxJob.isTracking;
+
+  // Merge results: prefer hook-level results when available, fall back to
+  // the tracked results recovered after a browser refresh.
+  const hookResults = mode === 'email' ? inbound.response?.results || [] : upload.result ? [upload.result] : [];
+  const results = hookResults.length > 0
+    ? hookResults
+    : sandboxJob.trackedResults.length > 0
+      ? sandboxJob.trackedResults
+      : [];
+
+  const emailPayload = inbound.response?.email || sandboxJob.trackedEmail;
   const error = mode === 'email' ? inbound.error : upload.error;
-  const highlightIds = results.map((r) => r.ingestion_id).filter(Boolean);
+  const highlightIds = results.map((r) => r.ingestion_id ?? r.document_id).filter(Boolean);
 
+  /**
+   * Wraps an upload/email promise: after it resolves, refreshes the Excel
+   * preview and kicks off a background check for the newly created PROCESSING
+   * record (in case the response arrives before the commit).
+   */
   const afterRun = async (promise) => {
     await promise;
     excel.refresh();
@@ -75,11 +97,11 @@ const SandboxPage = () => {
             <ResultsPlaceholder isRunning={isRunning} error={error} mode={mode} />
           ) : (
             <>
-              {mode === 'email' && inbound.response && (
-                <EmailPayloadCard email={inbound.response.email} results={results} />
+              {mode === 'email' && emailPayload && (
+                <EmailPayloadCard email={emailPayload} results={results} />
               )}
               {results.map((result, idx) => (
-                <ExtractionResultCard key={result.ingestion_id ?? `${result.filename}-${idx}`} result={result} />
+                <ExtractionResultCard key={result.ingestion_id ?? result.document_id ?? `${result.filename}-${idx}`} result={result} />
               ))}
             </>
           )}
