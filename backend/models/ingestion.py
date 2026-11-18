@@ -10,6 +10,11 @@ from sqlalchemy.sql import func
 
 from database import Base
 
+# Pre-LLM status assigned when a document enters the pipeline but extraction
+# has not yet completed.  Allows the Sandbox UI to display a persistent
+# loading spinner even after a browser refresh.
+STATUS_PROCESSING = "PROCESSING"
+
 
 class InboundEmail(Base):
     """One email received by the inbound webhook (headers + body)."""
@@ -47,7 +52,7 @@ class DocumentIngestion(Base):
     prompt_name = Column(String(500))
     provider = Column(String(50))
     model = Column(String(100))
-    status = Column(String(30), index=True)  # VALID | NEEDS_REVIEW | EXTRACTION_FAILED
+    status = Column(String(30), index=True)  # PROCESSING | VALID | NEEDS_REVIEW | EXTRACTION_FAILED
     issues = Column(JSON)
     extracted_data = Column(JSON, nullable=True)
     attempts = Column(JSON)
@@ -69,6 +74,16 @@ class DocumentIngestion(Base):
         index=True,
         comment="UUID of the user who performed the latest manual review or modification",
     )
+    # Sandbox job ownership: tracks who initiated this ingestion so the UI can
+    # poll only the current user's in-flight jobs (BOLA/IDOR protection).
+    created_by_id = Column(
+        String(36),
+        ForeignKey("user_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="UUID of the user who initiated this ingestion (Sandbox only; NULL for production webhooks)",
+    )
 
     email = relationship("InboundEmail", back_populates="documents", lazy="joined")
     updated_by = relationship("UserProfile", foreign_keys=[updated_by_id], lazy="joined")
+    created_by = relationship("UserProfile", foreign_keys=[created_by_id], lazy="joined")

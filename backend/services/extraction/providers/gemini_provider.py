@@ -123,7 +123,29 @@ class GeminiProvider(ExtractionProvider):
         """
         if genai is None:
             raise ProviderError("חבילת google-generativeai אינה מותקנת בסביבה זו", [])
-        uploaded = _upload_with_retry(file_path, mime_type)
+
+        # Read document bytes to support inline delivery
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+        uploaded: Any = None
+        # Google recently introduced Authorization keys (prefixed with "AQ.") which
+        # are authenticated via request headers but rejected by the legacy Google Discovery
+        # endpoint ($discovery/rest) used by genai.upload_file().
+        # For AQ keys (or as fallback when discovery fails), deliver the file directly
+        # as an inline blob Part to bypass the Discovery service entirely.
+        if self._api_key.startswith("AQ."):
+            uploaded = {"mime_type": mime_type, "data": file_bytes}
+        else:
+            try:
+                uploaded = _upload_with_retry(file_path, mime_type)
+            except Exception as upload_err:
+                if "discovery" in str(upload_err).lower() or "400" in str(upload_err):
+                    logger.info("Falling back to inline document delivery for Gemini (%s)", short_error(upload_err))
+                    uploaded = {"mime_type": mime_type, "data": file_bytes}
+                else:
+                    raise
+
         attempts: List[dict] = []
         try:
             for model_name in self._models:
@@ -144,7 +166,8 @@ class GeminiProvider(ExtractionProvider):
                         break
             raise ProviderError("כל מודלי Gemini נכשלו", attempts)
         finally:
-            self._delete_quietly(uploaded)
+            if uploaded is not None and not isinstance(uploaded, dict):
+                self._delete_quietly(uploaded)
 
     @staticmethod
     def _delete_quietly(uploaded: Any) -> None:

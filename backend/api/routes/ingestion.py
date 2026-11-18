@@ -8,10 +8,12 @@ facilitating testing and prompt engineering without affecting the main inbox.
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.dependencies.auth import require_approved_user
 from api.dependencies.byok import BYOKCredentials, get_byok_credentials
 from api.uploads import MB, read_upload_or_413
 from config import get_settings
 from database import get_db
+from models.user import UserProfile
 from schemas.ingestion import IngestionResult
 from services.file_storage import UnsupportedDocumentError
 from services.ingestion_pipeline import NoActivePromptError, ingest_document
@@ -23,6 +25,7 @@ router = APIRouter()
 async def ingest_sample(
     file: UploadFile = File(...),
     byok: BYOKCredentials = Depends(get_byok_credentials),
+    current_user: UserProfile = Depends(require_approved_user),
     db: AsyncSession = Depends(get_db),
 ) -> IngestionResult:
     """Runs a single uploaded PDF or image through the production pipeline.
@@ -31,10 +34,15 @@ async def ingest_sample(
     testers see exactly what the finance team will see. This isolated channel
     helps users safely preview changes to extraction prompts or logic.
 
+    The ``current_user.id`` is forwarded as ``user_id`` so that the two-stage
+    pipeline can stamp ownership on the PROCESSING record, enabling the
+    Sandbox UI to track in-flight jobs across browser refreshes.
+
     Args:
-        file (UploadFile): The document file (PDF or image) uploaded by the user.
-        byok (BYOKCredentials): Ephemeral API keys injected from request headers.
-        db (AsyncSession): The database session dependency.
+        file: The document file (PDF or image) uploaded by the user.
+        byok: Ephemeral API keys injected from request headers.
+        current_user: The verified, approved Backoffice user.
+        db: The database session dependency.
 
     Returns:
         IngestionResult: A structured result containing the extraction status,
@@ -52,6 +60,7 @@ async def ingest_sample(
             content=content,
             channel="sandbox",
             extractor=byok.get_extractor(),
+            user_id=str(current_user.id),
         )
     except UnsupportedDocumentError as error:
         raise HTTPException(status_code=415, detail=str(error)) from error
