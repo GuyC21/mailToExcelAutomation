@@ -1,8 +1,13 @@
-"""Inbound email webhook – the system's "mailbox".
+"""Production Inbound Email Webhook Router (REALITY ENVIRONMENT).
 
-No real mailbox is monitored (per the assignment); instead any mail provider
-(SendGrid / Mailgun / Postmark) or the ``simulate`` tooling POSTs the email here.
-Three wire formats are accepted, all normalised by ``services.email_parser``.
+This module serves as the production webhook gateway for authentic external email
+delivery services (SendGrid, Postmark, Mailgun, AWS SES, Office 365 relays).
+
+Separation of Concerns:
+- Reality vs. Simulation: Sandbox simulations reside in ``api.routes.email_simulation``.
+- Security Boundary: Strictly gated by ``require_inbound_access`` (pre-shared ``X-Inbound-Token``).
+- Quota Policy: Genuine verified incoming emails are authorized to use the production
+  Server API Key (``GEMINI_API_KEY`` from ``.env``).
 """
 from typing import List, Optional
 
@@ -20,15 +25,16 @@ from services.ingestion_pipeline import NoActivePromptError, ingest_email
 
 _MAX_EML_BYTES = 25 * 1024 * 1024
 
-
-# Shared-secret check for webhook callers (see ``api.security``): a valid
-# ``X-Inbound-Token`` (mail provider) or Backoffice ``X-API-Key`` (Sandbox UI)
-# is required as soon as either secret is configured.
+# Shared-secret check for webhook callers (see api.security):
+# Only authentic external deliveries providing a valid X-Inbound-Token are authorized.
 router = APIRouter(dependencies=[Depends(require_inbound_access)])
 
 
 async def _process(db: AsyncSession, payload: InboundEmailPayload) -> EmailIngestionResponse:
-    """Internal helper to ingest an email payload and map to a standard response.
+    """Internal helper to ingest an authentic production email payload.
+
+    Leaves extractor=None so that the pipeline defaults to the server-wide
+    configured Server API Key (GEMINI_API_KEY).
 
     Args:
         db (AsyncSession): The database session.
@@ -41,7 +47,8 @@ async def _process(db: AsyncSession, payload: InboundEmailPayload) -> EmailInges
         HTTPException: If there is no active prompt configured (409).
     """
     try:
-        email, results = await ingest_email(db, payload)
+        # None defaults to get_extractor() -> uses production Server API Key
+        email, results = await ingest_email(db, payload, extractor=None)
     except NoActivePromptError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     return EmailIngestionResponse(
