@@ -5,8 +5,9 @@ network drops or capacity issues trigger retries or fallback to the next model
 in the configured chain. This ensures maximum success rate before failing the extraction.
 """
 import logging
+import threading
 import time
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import google.generativeai as genai
@@ -36,6 +37,15 @@ _FALLBACK_MARKERS = (
 _USER_PROMPT = "Extract the data from the attached document according to the system instructions."
 _UPLOAD_RETRIES = 3
 _UPLOAD_BACKOFF_SECONDS = 1.5
+# google.generativeai stores its API key in module-global state; serialize
+# configure + SDK calls across threads so BYOK keys never leak across requests.
+_GENAI_LOCK = threading.Lock()
+
+
+def _read_inline_blob(file_path: str, mime_type: str) -> Dict[str, Any]:
+    """Reads a local file lazily for inline Gemini part delivery."""
+    with open(file_path, "rb") as handle:
+        return {"mime_type": mime_type, "data": handle.read()}
 
 
 def _is_retryable(error: Exception) -> bool:
@@ -96,8 +106,6 @@ class GeminiProvider(ExtractionProvider):
         """
         self._api_key = (api_key or "").strip()
         self._models = models
-        if self._api_key and genai is not None:
-            genai.configure(api_key=self._api_key)
 
     def is_configured(self) -> bool:
         """Checks if the Gemini API key is configured.
@@ -124,50 +132,50 @@ class GeminiProvider(ExtractionProvider):
         if genai is None:
             raise ProviderError("חבילת google-generativeai אינה מותקנת בסביבה זו", [])
 
-        # Read document bytes to support inline delivery
-        with open(file_path, "rb") as f:
-            file_bytes = f.read()
+        with _GENAI_LOCK:
+            if hasattr(genai, "configure"):
+                genai.configure(api_key=self._api_key)
 
-        uploaded: Any = None
-        # Google recently introduced Authorization keys (prefixed with "AQ.") which
-        # are authenticated via request headers but rejected by the legacy Google Discovery
-        # endpoint ($discovery/rest) used by genai.upload_file().
-        # For AQ keys (or as fallback when discovery fails), deliver the file directly
-        # as an inline blob Part to bypass the Discovery service entirely.
-        if self._api_key.startswith("AQ."):
-            uploaded = {"mime_type": mime_type, "data": file_bytes}
-        else:
-            try:
-                uploaded = _upload_with_retry(file_path, mime_type)
-            except Exception as upload_err:
-                if "discovery" in str(upload_err).lower() or "400" in str(upload_err):
-                    logger.info("Falling back to inline document delivery for Gemini (%s)", short_error(upload_err))
-                    uploaded = {"mime_type": mime_type, "data": file_bytes}
-                else:
-                    raise
-
-        attempts: List[dict] = []
-        try:
-            for model_name in self._models:
+            uploaded: Any = None
+            # Google recently introduced Authorization keys (prefixed with "AQ.") which
+            # are authenticated via request headers but rejected by the legacy Google Discovery
+            # endpoint ($discovery/rest) used by genai.upload_file().
+            # For AQ keys (or as fallback when discovery fails), deliver the file directly
+            # as an inline blob Part lazily to avoid unnecessary memory reads.
+            if self._api_key.startswith("AQ."):
+                uploaded = _read_inline_blob(file_path, mime_type)
+            else:
                 try:
-                    model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
-                    response = model.generate_content(
-                        [_USER_PROMPT, uploaded],
-                        generation_config=genai.types.GenerationConfig(
-                            response_mime_type="application/json",
-                            temperature=0,
-                        ),
-                    )
-                    return ProviderResponse(raw_text=response.text, model=model_name)
-                except Exception as error:  # vendor SDK raises many types
-                    attempts.append({"provider": self.name, "model": model_name, "error": short_error(error)})
-                    logger.warning("Gemini model %s failed: %s", model_name, short_error(error, 120))
-                    if not _is_retryable(error):
-                        break
-            raise ProviderError("כל מודלי Gemini נכשלו", attempts)
-        finally:
-            if uploaded is not None and not isinstance(uploaded, dict):
-                self._delete_quietly(uploaded)
+                    uploaded = _upload_with_retry(file_path, mime_type)
+                except Exception as upload_err:
+                    if "discovery" in str(upload_err).lower() or "400" in str(upload_err):
+                        logger.info("Falling back to inline document delivery for Gemini (%s)", short_error(upload_err))
+                        uploaded = _read_inline_blob(file_path, mime_type)
+                    else:
+                        raise
+
+            attempts: List[dict] = []
+            try:
+                for model_name in self._models:
+                    try:
+                        model = genai.GenerativeModel(model_name, system_instruction=system_prompt)
+                        response = model.generate_content(
+                            [_USER_PROMPT, uploaded],
+                            generation_config=genai.types.GenerationConfig(
+                                response_mime_type="application/json",
+                                temperature=0,
+                            ),
+                        )
+                        return ProviderResponse(raw_text=response.text, model=model_name)
+                    except Exception as error:  # vendor SDK raises many types
+                        attempts.append({"provider": self.name, "model": model_name, "error": short_error(error)})
+                        logger.warning("Gemini model %s failed: %s", model_name, short_error(error, 120))
+                        if not _is_retryable(error):
+                            break
+                raise ProviderError("כל מודלי Gemini נכשלו", attempts)
+            finally:
+                if uploaded is not None and not isinstance(uploaded, dict):
+                    self._delete_quietly(uploaded)
 
     @staticmethod
     def _delete_quietly(uploaded: Any) -> None:

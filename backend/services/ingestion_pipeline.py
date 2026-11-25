@@ -3,6 +3,7 @@
 Both entry points (inbound email webhook and Sandbox upload) go through
 ``ingest_document`` so the demo exercises exactly the production path.
 """
+import asyncio
 import hashlib
 import logging
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,7 @@ class NoActivePromptError(RuntimeError):
 
 @lru_cache
 def get_extractor() -> DocumentExtractor:
+    """Returns the cached process-wide ``DocumentExtractor`` instance."""
     return DocumentExtractor.from_settings()
 
 
@@ -86,7 +88,7 @@ async def ingest_document(db: AsyncSession, *, filename: str, content: bytes, ch
     prompt = await get_active_prompt(db)
     if not prompt:
         raise NoActivePromptError("אין פרומפט פעיל. יש להפעיל פרומפט במסך ניהול הפרומפטים.")
-    stored = store_document(filename, content)
+    stored = await asyncio.to_thread(store_document, filename, content)
     active_extractor = extractor or get_extractor()
 
     # ── Stage 1: Pre-LLM — persist a PROCESSING placeholder ────────────
@@ -197,11 +199,16 @@ async def ingest_email(
                                            error="הקובץ אינו PDF או תמונה – לא עובד כטופס התחשבנות"))
             continue
 
-        key = _attachment_key(payload, attachment.content)
-        claimed, prior_ingestion_id = await _claim_attachment(key)
-        if not claimed:
-            results.append(await _duplicate_result(db, name, prior_ingestion_id))
-            continue
+        # Production webhooks (user_id is None) enforce idempotency so email
+        # retries never duplicate invoices. Sandbox simulations skip global
+        # dedupe so testers can re-run sample emails cleanly without cross-user hits.
+        claim_key: Optional[str] = None
+        if user_id is None:
+            claim_key = _attachment_key(payload, attachment.content)
+            claimed, prior_ingestion_id = await _claim_attachment(claim_key)
+            if not claimed:
+                results.append(await _duplicate_result(db, name, prior_ingestion_id, user_id=user_id))
+                continue
         try:
             result = await ingest_document(
                 db,
@@ -209,18 +216,20 @@ async def ingest_email(
                 content=attachment.content,
                 channel="email",
                 email=email,
-                claim_key=key,
+                claim_key=claim_key,
                 extractor=extractor,
                 user_id=user_id,
             )
         except UnsupportedDocumentError as error:
-            await _release_claim(key)
+            if claim_key is not None:
+                await _release_claim(claim_key)
             results.append(IngestionResult(filename=name, channel="email", status=STATUS_SKIPPED, error=str(error)))
             continue
         except BaseException:
             # Only releases a claim that never got a record (see _release_claim),
             # so the provider's retry can process the attachment.
-            await _release_claim(key)
+            if claim_key is not None:
+                await _release_claim(claim_key)
             raise
         results.append(result)
     return email, results
@@ -294,12 +303,22 @@ async def _release_claim(key: str) -> None:
         await session.commit()
 
 
-async def _duplicate_result(db: AsyncSession, filename: str, ingestion_id: Optional[int]) -> IngestionResult:
-    """Reports a replayed attachment using the record created the first time."""
+async def _duplicate_result(
+    db: AsyncSession,
+    filename: str,
+    ingestion_id: Optional[int],
+    user_id: Optional[str] = None,
+) -> IngestionResult:
+    """Reports a replayed attachment using the matching-scope record created earlier."""
     if ingestion_id is None:
         return IngestionResult(filename=filename, channel="email", status=STATUS_SKIPPED, duplicate=True,
                                error="הקובץ כבר נמצא בעיבוד ממשלוח קודם של אותו מייל – לא נוצרה רשומה כפולה")
-    record = (await db.execute(select(DocumentIngestion).where(DocumentIngestion.id == ingestion_id))).scalars().first()
+    stmt = select(DocumentIngestion).where(DocumentIngestion.id == ingestion_id)
+    if user_id is None:
+        stmt = stmt.where(DocumentIngestion.created_by_id.is_(None))
+    else:
+        stmt = stmt.where(DocumentIngestion.created_by_id == user_id)
+    record = (await db.execute(stmt)).scalars().first()
     if record is None:
         return IngestionResult(filename=filename, channel="email", status=STATUS_SKIPPED, duplicate=True,
                                error="הקובץ כבר נקלט בעבר – לא נוצרה רשומה כפולה")

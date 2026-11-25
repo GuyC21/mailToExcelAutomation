@@ -1,6 +1,6 @@
-"""Audit-trail tables for inbound emails and per-document ingestions.
+"""Audit-trail table for per-document ingestions.
 
-The Excel workbook is the finance team's source of truth; these tables are the
+The Excel workbook is the finance team's source of truth; this table is the
 operational log behind it: every attempt (including failures) is recorded,
 together with the raw model answer, so any Excel row can be traced back.
 """
@@ -9,30 +9,12 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from database import Base
+from models.inbound_email import InboundEmail  # noqa: F401  (backward-compatible re-export)
 
 # Pre-LLM status assigned when a document enters the pipeline but extraction
 # has not yet completed.  Allows the Sandbox UI to display a persistent
 # loading spinner even after a browser refresh.
 STATUS_PROCESSING = "PROCESSING"
-
-
-class InboundEmail(Base):
-    """One email received by the inbound webhook (headers + body)."""
-
-    __tablename__ = "inbound_emails"
-
-    id = Column(Integer, primary_key=True, index=True)
-    source_format = Column(String(20), nullable=False)  # multipart | json | eml
-    message_id = Column(String(500), index=True)
-    sender = Column(String(500))
-    recipients = Column(String(1000))
-    subject = Column(String(1000))
-    sent_at = Column(String(100))  # Raw "Date" header, as sent
-    body_text = Column(Text)
-    headers = Column(JSON)
-    received_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    documents = relationship("DocumentIngestion", back_populates="email")
 
 
 class DocumentIngestion(Base):

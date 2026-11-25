@@ -28,7 +28,12 @@ const CaseList = ({ cases, selectedName, onSelect, onNew, onDelete }) => (
             role="button"
             tabIndex={0}
             onClick={() => onSelect(c.name)}
-            onKeyDown={(e) => e.key === 'Enter' && onSelect(c.name)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelect(c.name);
+              }
+            }}
             className={`p-3 flex items-center justify-between gap-2 cursor-pointer transition ${
               selectedName === c.name ? 'bg-blue-50' : 'hover:bg-gray-50'
             }`}

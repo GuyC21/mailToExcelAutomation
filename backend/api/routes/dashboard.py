@@ -15,11 +15,10 @@ import math
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models.ingestion import DocumentIngestion
+from repositories import ingestion_repository as ingestion_repo
 
 router = APIRouter()
 
@@ -28,9 +27,13 @@ _TEST_PROVIDERS = {"mock"}
 _ILS_ALIASES = {"", "ILS", "NIS", "₪", "ש\"ח", "ש״ח", "שח", "שקל", "שקלים"}
 
 
-def is_test_record(record: DocumentIngestion) -> bool:
-    """Sandbox uploads and mock extractions are not operational activity."""
-    return record.channel in _TEST_CHANNELS or (record.provider or "") in _TEST_PROVIDERS
+def is_test_record(record: Any) -> bool:
+    """Sandbox uploads, user-triggered email simulations, and mock runs are test activity."""
+    return (
+        record.channel in _TEST_CHANNELS
+        or (record.provider or "") in _TEST_PROVIDERS
+        or bool(getattr(record, "created_by_id", None))
+    )
 
 
 def normalise_currency(value: Any) -> str:
@@ -74,8 +77,7 @@ async def get_dashboard_stats(
             - top_suppliers (list): Top 5 suppliers by amount in ``top_suppliers_currency``.
             - top_suppliers_currency (str | None): The currency of that ranking.
     """
-    result = await db.execute(select(DocumentIngestion))
-    records = result.unique().scalars().all()
+    records = await ingestion_repo.list_dashboard_records(db)
 
     excluded = 0
     in_scope = []

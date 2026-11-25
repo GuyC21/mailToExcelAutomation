@@ -13,7 +13,6 @@ from schemas.auth import (
     UpdateUserStatusRequest,
     UserProfileResponse,
 )
-import repositories.user_repository as user_repo
 import services.auth.user_service as user_svc
 
 router = APIRouter()
@@ -42,12 +41,8 @@ async def sync_profile(
     Returns:
         The synchronized UserProfileResponse.
     """
-    if payload.full_name and payload.full_name != current_user.full_name:
-        current_user.full_name = payload.full_name
-        await db.commit()
-        await db.refresh(current_user)
-
-    return UserProfileResponse.model_validate(current_user)
+    updated = await user_svc.sync_user_display_name(db=db, user=current_user, full_name=payload.full_name)
+    return UserProfileResponse.model_validate(updated)
 
 
 @router.get(
@@ -124,14 +119,23 @@ async def update_status(
         The updated UserProfileResponse.
 
     Raises:
-        HTTPException: 404 if the target user was not found.
+        HTTPException: 400 if an admin attempts to lock themselves out, 404 if
+            the target user was not found.
     """
-    if payload.status == UserStatus.APPROVED:
-        updated = await user_svc.approve_user(db=db, user_id=user_id, approver_id=admin.id)
-    elif payload.status == UserStatus.REJECTED:
-        updated = await user_svc.reject_user(db=db, user_id=user_id, approver_id=admin.id)
-    else:
-        updated = await user_repo.update_user_status(db=db, user_id=user_id, status=payload.status)
+    try:
+        if payload.status == UserStatus.APPROVED:
+            updated = await user_svc.approve_user(db=db, user_id=user_id, approver_id=admin.id)
+        elif payload.status == UserStatus.REJECTED:
+            updated = await user_svc.reject_user(db=db, user_id=user_id, approver_id=admin.id)
+        else:
+            updated = await user_svc.change_user_status(
+                db=db,
+                user_id=user_id,
+                status=payload.status,
+                approver_id=admin.id,
+            )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     if not updated:
         raise HTTPException(status_code=404, detail="המשתמש המבוקש לא נמצא")

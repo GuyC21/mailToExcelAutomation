@@ -14,6 +14,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.rate_limit import RateLimiter
 from api.security import require_inbound_access
 from api.uploads import MB, UploadTooLargeError, read_upload_limited, read_upload_or_413
 from config import get_settings
@@ -24,10 +25,11 @@ from services.email_parser import EmailParseError, parse_eml, parse_json, parse_
 from services.ingestion_pipeline import NoActivePromptError, ingest_email
 
 _MAX_EML_BYTES = 25 * 1024 * 1024
+_email_rate_limit = RateLimiter(max_requests=60, window_seconds=60)
 
-# Shared-secret check for webhook callers (see api.security):
+# Shared-secret check + rate limiting for webhook callers (see api.security):
 # Only authentic external deliveries providing a valid X-Inbound-Token are authorized.
-router = APIRouter(dependencies=[Depends(require_inbound_access)])
+router = APIRouter(dependencies=[Depends(require_inbound_access), Depends(_email_rate_limit)])
 
 
 async def _process(db: AsyncSession, payload: InboundEmailPayload) -> EmailIngestionResponse:
@@ -124,10 +126,16 @@ async def inbound_json(request: JsonEmailRequest, db: AsyncSession = Depends(get
         EmailIngestionResponse: The parsed email info and extraction results.
 
     Raises:
-        HTTPException: If the JSON payload cannot be parsed as a valid email (400).
+        HTTPException: If attachment count exceeds limit (413) or payload is malformed (400).
     """
+    settings = get_settings()
+    if len(request.attachments) > settings.max_email_attachments:
+        raise HTTPException(
+            status_code=413,
+            detail=f"יותר מ-{settings.max_email_attachments} קבצים מצורפים במייל אחד",
+        )
     try:
-        payload = parse_json(request, max_attachment_bytes=get_settings().max_upload_mb * MB)
+        payload = parse_json(request, max_attachment_bytes=settings.max_upload_mb * MB)
     except EmailParseError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return await _process(db, payload)
@@ -149,11 +157,17 @@ async def inbound_eml(file: UploadFile = File(..., description="A raw .eml (RFC 
         EmailIngestionResponse: The parsed email info and extraction results.
 
     Raises:
-        HTTPException: If the file is too large (413) or cannot be parsed (400).
+        HTTPException: If the file or attachment count is too large (413) or cannot be parsed (400).
     """
+    settings = get_settings()
     raw = await read_upload_or_413(file, _MAX_EML_BYTES, "קובץ המייל")
     try:
-        payload = parse_eml(raw)
+        payload = parse_eml(raw, max_attachment_bytes=settings.max_upload_mb * MB)
     except EmailParseError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    if len(payload.attachments) > settings.max_email_attachments:
+        raise HTTPException(
+            status_code=413,
+            detail=f"יותר מ-{settings.max_email_attachments} קבצים מצורפים במייל אחד",
+        )
     return await _process(db, payload)

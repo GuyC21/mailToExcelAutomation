@@ -1,19 +1,20 @@
 import React from 'react';
 import { Trash2, GitCompareArrows, Clock } from 'lucide-react';
 import ScoreGauge from './ScoreGauge';
-
-const dateFormatter = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' });
+import { formatDateTime } from '../../utils/format';
 
 /**
  * Persisted run history (`RegressionRun` rows) with checkboxes to pick two
  * runs for the A/B Comparison view.
  *
+ * @component
  * @param {{
  *   runs: object[], loading: boolean, error: string|null,
  *   selected: number[], onToggleSelect: (id: number) => void,
  *   onDelete: (id: number) => void,
  *   onCompare: () => void, compareLoading: boolean,
  * }} props
+ * @returns {JSX.Element}
  */
 export default function RunHistoryPanel({ runs, loading, error, selected, onToggleSelect, onDelete, onCompare, compareLoading }) {
   if (loading) {
@@ -33,12 +34,13 @@ export default function RunHistoryPanel({ runs, loading, error, selected, onTogg
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <p className="text-sm text-gray-500">בחר שתי הרצות כדי להשוות ביניהן (A/B)</p>
         <button
+          type="button"
           onClick={onCompare}
           disabled={selected.length !== 2 || compareLoading}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-white transition shadow ${
+          className={`flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-white transition shadow ${
             selected.length !== 2 || compareLoading ? 'bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
           }`}
         >
@@ -74,7 +76,7 @@ export default function RunHistoryPanel({ runs, loading, error, selected, onTogg
                   />
                 </td>
                 <td className="py-2 px-3 text-sm text-gray-700 whitespace-nowrap">
-                  #{run.id} · {dateFormatter.format(new Date(run.created_at))}
+                  #{run.id} · {formatDateTime(run.created_at)}
                 </td>
                 <td className="py-2 px-3 text-sm text-gray-800">
                   {run.prompt_name || '—'}{run.prompt_is_active && <span className="text-green-600"> (פעיל)</span>}
@@ -89,6 +91,7 @@ export default function RunHistoryPanel({ runs, loading, error, selected, onTogg
                 <td className="py-2 px-3 text-center text-sm text-gray-600">{Number(run.coverage).toFixed(0)}%</td>
                 <td className="py-2 px-3 text-center">
                   <button
+                    type="button"
                     onClick={() => onDelete(run.id)}
                     className="text-gray-400 hover:text-red-600 transition"
                     aria-label={`מחק הרצה #${run.id}`}

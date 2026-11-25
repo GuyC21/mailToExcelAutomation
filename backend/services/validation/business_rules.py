@@ -36,6 +36,7 @@ class ValidationIssue:
     line_number: Optional[int] = None
 
     def to_dict(self) -> dict:
+        """Serializes the validation issue into a plain dictionary."""
         return asdict(self)
 
 

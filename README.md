@@ -187,11 +187,17 @@ prompt version.
 
 ## Access & deployment
 All ports in `docker-compose.yml` are bound to `127.0.0.1`, so the stack is reachable only from the
-machine running it. The Backoffice has no per-user accounts; before exposing it to a network set
-`BACKOFFICE_API_KEY` – every Backoffice route then requires `X-API-Key` (plain links such as the Excel
-download use `?api_key=`), and compose passes the same value to the UI as `VITE_API_KEY`. A key that
-ships inside a browser bundle keeps strangers out; it is not per-user authentication. The email
-webhook accepts either `INBOUND_EMAIL_TOKEN` or the Backoffice key once either is set.
+machine running it, with `CORS_ORIGINS` configuring allowed browser origins. Backoffice routes
+**fail closed by default** and require either per-user **Supabase Auth** (verified JWT tokens via
+`SUPABASE_JWT_SECRET`, JWKS, or Supabase `/auth/v1/user`) paired with an administrator approval
+workflow (`PENDING`, `APPROVED`, `REJECTED`, `SUSPENDED`) and RBAC (`ADMIN` / `USER`), or optional
+`BACKOFFICE_API_KEY` (`X-API-Key`) for headless scripts. If no authentication secret or provider is
+configured, Backoffice endpoints return `503` (unless running offline `pytest` fixtures). Protected
+document previews and Excel exports authenticate via `Authorization: Bearer` requests rather than
+query-string JWTs, and interactive Sandbox/Regression AI calls support ephemeral **BYOK** headers
+(`X-Gemini-API-Key` / `X-OpenAI-API-Key` stored strictly in browser `sessionStorage`). The
+production webhook (`POST /api/email/inbound`) also fails closed unless `INBOUND_EMAIL_TOKEN` (or
+`BACKOFFICE_API_KEY`) is configured.
 
 The financial dashboard shows **operational** data by default – emailed documents read by a real AI
 provider. Sandbox uploads and `mock` extractions are test activity and appear only when "include tests"

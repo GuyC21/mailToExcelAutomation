@@ -31,6 +31,8 @@ class RegressionCaseSaveResult(BaseModel):
 
 
 class RegressionCaseDeleteResult(BaseModel):
+    """Confirmation payload after deleting a labeled ground-truth case."""
+
     success: bool
 
 
@@ -63,6 +65,7 @@ class RegressionRunSummary(BaseModel):
     # shape matches the live (non-persisted) report's "prompt": {"id": ...}.
     @classmethod
     def from_run(cls, run: "Any") -> "RegressionRunSummary":
+        """Constructs a summary schema from a ``RegressionRun`` ORM instance."""
         return cls(
             id=run.id, created_at=run.created_at, prompt_id=run.prompt_version_id,
             prompt_name=run.prompt_name, prompt_is_active=run.prompt_is_active,
@@ -82,16 +85,21 @@ class RegressionRunDetail(RegressionRunSummary):
 
     @classmethod
     def from_run(cls, run: "Any") -> "RegressionRunDetail":
+        """Constructs a detailed run schema including per-case results from an ORM run."""
         base = RegressionRunSummary.from_run(run)
         return cls(**base.model_dump(), suite_dir=run.suite_dir,
                    generated_at=run.generated_at, results=run.results or [])
 
 
 class RegressionRunListResponse(BaseModel):
+    """Collection of persisted regression run summaries."""
+
     runs: List[RegressionRunSummary]
 
 
 class RegressionRunDeleteResult(BaseModel):
+    """Confirmation payload after deleting a persisted regression run."""
+
     success: bool
 
 
@@ -117,7 +125,17 @@ class RegressionCaseComparison(BaseModel):
 
 
 class RegressionCompareResponse(BaseModel):
+    """Side-by-side comparison payload for two persisted regression runs."""
+
     run_a: RegressionRunDetail
     run_b: RegressionRunDetail
     cases: List[RegressionCaseComparison]
     summary_delta: Dict[str, float]  # run_b - run_a, for the headline metrics
+
+
+class RegressionResponse(BaseModel):
+    """Response envelope returned when executing a regression suite run."""
+
+    success: bool
+    data: Dict[str, Any]
+    error: Optional[str] = None

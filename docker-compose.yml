@@ -15,7 +15,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-billingstream}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -25,19 +25,20 @@ services:
       context: ./backend
     image: billingstream-backend:latest
     container_name: billingstream_backend
-    # Loopback only. The Backoffice API has no per-user auth; before exposing it
-    # beyond this machine set BACKOFFICE_API_KEY (and VITE_API_KEY for the UI).
+    user: "${UID:-1000}:${GID:-1000}"
+    # Loopback only; Backoffice routes fail closed until Supabase Auth or BACKOFFICE_API_KEY is configured.
     ports:
       - "127.0.0.1:8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-billingstream}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - GEMINI_MODELS=${GEMINI_MODELS:-gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite}
+      - GEMINI_MODELS=${GEMINI_MODELS:-gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
       - DEFAULT_VAT_RATE=${DEFAULT_VAT_RATE:-18}
       - INBOUND_EMAIL_TOKEN=${INBOUND_EMAIL_TOKEN:-}
       - BACKOFFICE_API_KEY=${BACKOFFICE_API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
       - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
@@ -68,9 +69,8 @@ services:
       - VITE_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
     depends_on:
       - backend
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    command: npm run dev -- --host 0.0.0.0
 
 volumes:
   postgres_data:
     name: billingstream_postgres_data
-    external: true

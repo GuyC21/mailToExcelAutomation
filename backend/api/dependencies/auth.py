@@ -3,12 +3,15 @@
 Extracts and validates Supabase JWTs, enforces account lifecycle approval
 (status == APPROVED), and verifies administrative privileges (role == ADMIN).
 """
+import asyncio
+from functools import lru_cache
 import logging
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, Header, HTTPException, Query
 import httpx
 import jwt
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.security import _matches
@@ -20,6 +23,12 @@ import repositories.user_repository as user_repo
 logger = logging.getLogger("billingstream.auth")
 
 
+@lru_cache(maxsize=8)
+def _get_jwks_client(jwks_url: str) -> jwt.PyJWKClient:
+    """Returns a cached PyJWKClient instance for asymmetric token verification."""
+    return jwt.PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
+
+
 async def get_current_user(
     authorization: Optional[str] = Header(None),
     x_api_key: Optional[str] = Header(None),
@@ -29,18 +38,27 @@ async def get_current_user(
 ) -> UserProfile:
     """FastAPI dependency: resolves and authenticates the requesting identity.
 
-    Supports:
-    1. Standard Supabase Bearer JWT in the ``Authorization`` header.
-    2. URL query token (``?token=``) for links that cannot carry headers (previews, downloads).
-    3. Legacy ``X-API-Key`` (or ``?api_key=``) for backward-compatible headless scripts.
+    Fail-closed security policy:
+    1. Verified Supabase Bearer JWT in the ``Authorization`` header (HMAC secret,
+       JWKS asymmetric key, or Supabase ``/auth/v1/user`` API verification).
+    2. Legacy ``X-API-Key`` (or ``?api_key=``) when ``BACKOFFICE_API_KEY`` is set.
+    3. Test-only bypass when ``settings.auth_disabled_for_tests`` is explicitly True
+       and no credentials are configured (offline pytest suites only).
+
+    Note:
+        The unused ``token`` query parameter is retained solely for Python unit-test
+        call-site compatibility; query-string JWTs are never accepted.
 
     Raises:
-        HTTPException: 401 if credentials are missing, malformed, or invalid.
+        HTTPException: 401 on missing/invalid tokens, or 503 if server auth is unconfigured.
     """
     settings = get_settings()
 
     # 1. Backwards-compatibility for automated scripts holding BACKOFFICE_API_KEY
-    if settings.backoffice_api_key and (_matches(settings.backoffice_api_key, x_api_key) or _matches(settings.backoffice_api_key, api_key)):
+    if settings.backoffice_api_key and (
+        _matches(settings.backoffice_api_key, x_api_key)
+        or _matches(settings.backoffice_api_key, api_key)
+    ):
         return UserProfile(
             id="system-api-key",
             email="system@billingstream.local",
@@ -49,12 +67,31 @@ async def get_current_user(
             status=UserStatus.APPROVED,
         )
 
-    # 2. Extract Bearer JWT from header or query param
-    raw_token = token
-    if authorization and authorization.lower().startswith("bearer "):
+    # 2. Extract Bearer JWT strictly from Authorization header (never query string)
+    _ = token  # Query-string JWTs are disallowed to prevent URL/Referrer token leaks.
+    raw_token: Optional[str] = None
+    if isinstance(authorization, str) and authorization.lower().startswith("bearer "):
         raw_token = authorization[7:].strip()
 
+    secret = (settings.supabase_jwt_secret or "").strip()
+    supabase_url = (settings.supabase_url or "").strip().rstrip("/")
+    backoffice_key = (settings.backoffice_api_key or "").strip()
+    auth_configured = bool(secret or supabase_url or backoffice_key)
+
     if not raw_token:
+        if not auth_configured:
+            if settings.auth_disabled_for_tests:
+                return UserProfile(
+                    id="local-demo-user",
+                    email="demo@billingstream.local",
+                    full_name="Local Demo User",
+                    role=UserRole.ADMIN,
+                    status=UserStatus.APPROVED,
+                )
+            raise HTTPException(
+                status_code=503,
+                detail="שירות האימות אינו מוגדר בשרת",
+            )
         raise HTTPException(
             status_code=401,
             detail="נדרשת התחברות למערכת (נא להזין טוקן תקף)",
@@ -63,8 +100,6 @@ async def get_current_user(
 
     # 3. Decode & Verify Supabase JWT
     payload: Optional[Dict[str, Any]] = None
-    secret = (settings.supabase_jwt_secret or "").strip()
-    supabase_url = (settings.supabase_url or "").strip().rstrip("/")
     anon_key = (settings.supabase_anon_key or "").strip()
     service_role_key = (settings.supabase_service_role_key or "").strip()
 
@@ -88,14 +123,16 @@ async def get_current_user(
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="פג תוקף החיבור למערכת, נא להתחבר מחדש")
         except (jwt.PyJWTError, ValueError) as exc:
-            logger.info("HMAC signature verification fallback needed (%s). Checking next strategy...", exc)
+            if not supabase_url:
+                raise HTTPException(status_code=401, detail="טוקן התחברות לא תקין") from exc
+            logger.info("HMAC signature verification fallback needed (%s). Checking Supabase endpoint...", exc)
 
     # Strategy B: Asymmetric RS256/ES256 verification via Supabase JWKS endpoint
     if payload is None and supabase_url and token_alg.startswith(("RS", "ES")):
         try:
             jwks_url = f"{supabase_url}/auth/v1/.well-known/jwks.json"
-            jwks_client = jwt.PyJWKClient(jwks_url, cache_jwk_set=True, lifespan=3600)
-            signing_key = jwks_client.get_signing_key_from_jwt(raw_token)
+            jwks_client = _get_jwks_client(jwks_url)
+            signing_key = await asyncio.to_thread(jwks_client.get_signing_key_from_jwt, raw_token)
             payload = jwt.decode(
                 raw_token,
                 signing_key.key,
@@ -136,21 +173,6 @@ async def get_current_user(
         except Exception as exc:
             logger.warning("Supabase API user verification network error: %s", exc)
 
-    # Strategy D: Offline / Dev decode with strict expiration validation
-    if payload is None:
-        try:
-            unverified = jwt.decode(
-                raw_token,
-                options={"verify_signature": False, "verify_aud": False, "verify_exp": True},
-            )
-            if unverified.get("sub") and unverified.get("email"):
-                logger.info("Accepted unexpired token for user %s", unverified.get("email"))
-                payload = unverified
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(status_code=401, detail="פג תוקף החיבור למערכת, נא להתחבר מחדש")
-        except Exception:
-            pass
-
     if payload is None:
         raise HTTPException(status_code=401, detail="טוקן התחברות לא תקין")
 
@@ -172,39 +194,45 @@ async def get_current_user(
 
     user = await user_repo.get_user_by_id(db, user_id)
     if not user:
-        # Check if an existing profile exists with this email (e.g. seeded initial admin placeholder)
-        existing_by_email = await user_repo.get_user_by_email(db, email)
-        if existing_by_email:
-            role_to_set = UserRole.ADMIN if (is_initial_admin or existing_by_email.role == UserRole.ADMIN) else existing_by_email.role
-            status_to_set = UserStatus.APPROVED if (is_initial_admin or existing_by_email.status == UserStatus.APPROVED) else existing_by_email.status
-            meta_name = (payload.get("user_metadata") or {}).get("full_name") or existing_by_email.full_name
+        try:
+            # Check if an existing profile exists with this email (e.g. seeded initial admin placeholder)
+            existing_by_email = await user_repo.get_user_by_email(db, email)
+            if existing_by_email:
+                role_to_set = UserRole.ADMIN if (is_initial_admin or existing_by_email.role == UserRole.ADMIN) else existing_by_email.role
+                status_to_set = UserStatus.APPROVED if (is_initial_admin or existing_by_email.status == UserStatus.APPROVED) else existing_by_email.status
+                meta_name = (payload.get("user_metadata") or {}).get("full_name") or existing_by_email.full_name
 
-            await db.delete(existing_by_email)
-            await db.flush()
+                await db.delete(existing_by_email)
+                await db.flush()
 
-            user = await user_repo.upsert_user_profile(
-                db=db,
-                user_id=user_id,
-                email=email,
-                full_name=meta_name,
-                role=role_to_set,
-                status=status_to_set,
-            )
-            logger.info("Bound seeded email %s to real Supabase user ID %s (role=%s, status=%s)", email, user_id, role_to_set.value, status_to_set.value)
-        else:
-            user_metadata = payload.get("user_metadata") or {}
-            full_name = user_metadata.get("full_name", "")
+                user = await user_repo.upsert_user_profile(
+                    db=db,
+                    user_id=user_id,
+                    email=email,
+                    full_name=meta_name,
+                    role=role_to_set,
+                    status=status_to_set,
+                )
+                logger.info("Bound seeded email %s to real Supabase user ID %s (role=%s, status=%s)", email, user_id, role_to_set.value, status_to_set.value)
+            else:
+                user_metadata = payload.get("user_metadata") or {}
+                full_name = user_metadata.get("full_name", "")
 
-            user = await user_repo.upsert_user_profile(
-                db=db,
-                user_id=user_id,
-                email=email,
-                full_name=full_name,
-                role=UserRole.ADMIN if is_initial_admin else UserRole.USER,
-                status=UserStatus.APPROVED if is_initial_admin else UserStatus.PENDING,
-            )
-            if is_initial_admin:
-                logger.info("Created initial bootstrap admin user %s (%s)", user_id, email)
+                user = await user_repo.upsert_user_profile(
+                    db=db,
+                    user_id=user_id,
+                    email=email,
+                    full_name=full_name,
+                    role=UserRole.ADMIN if is_initial_admin else UserRole.USER,
+                    status=UserStatus.APPROVED if is_initial_admin else UserStatus.PENDING,
+                )
+                if is_initial_admin:
+                    logger.info("Created initial bootstrap admin user %s (%s)", user_id, email)
+        except IntegrityError:
+            await db.rollback()
+            user = await user_repo.get_user_by_id(db, user_id) or await user_repo.get_user_by_email(db, email)
+            if not user:
+                raise
     else:
         # If this existing user matches INITIAL_ADMIN_EMAIL, promote them immediately
         if is_initial_admin and (user.role != UserRole.ADMIN or user.status != UserStatus.APPROVED):
@@ -217,8 +245,6 @@ async def get_current_user(
             user.status = UserStatus.APPROVED
             await db.commit()
             await db.refresh(user)
-
-    return user
 
     return user
 

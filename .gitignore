@@ -74,5 +74,8 @@ Thumbs.db
 # Runtime documents received by the pipeline (supplier PII) and generated workbooks
 data/inbox/
 data/*.legacy-*.xlsx
+data/*.orphan-*.xlsx
 data/*.xlsx.tmp
+data/BillingStream_Master.xlsx
+data/output/
 .pytest_cache/

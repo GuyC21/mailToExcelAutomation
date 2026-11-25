@@ -48,7 +48,7 @@ def make_jwt(
 
 def test_unauthenticated_request_is_rejected(client):
     """Backoffice routes must reject requests with no authorization header."""
-    response = client.get("/api/dashboard/summary")
+    response = client.get("/api/dashboard/stats")
     assert response.status_code == 401
     assert "נדרשת התחברות למערכת" in response.json()["detail"]
 
@@ -57,7 +57,7 @@ def test_invalid_signature_is_rejected(client):
     """Requests with tampered or mismatched JWT signature must return 401."""
     tampered_token = make_jwt("user-tampered", "tampered@example.com", secret="wrong-secret")
     response = client.get(
-        "/api/dashboard/summary",
+        "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {tampered_token}"},
     )
     assert response.status_code == 401
@@ -68,7 +68,7 @@ def test_expired_token_is_rejected(client):
     """Expired tokens must return 401 with a specific re-login notice."""
     expired_token = make_jwt("user-exp", "exp@example.com", expired=True)
     response = client.get(
-        "/api/dashboard/summary",
+        "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {expired_token}"},
     )
     assert response.status_code == 401
@@ -90,7 +90,7 @@ def test_pending_user_is_blocked_from_backoffice_but_can_inspect_me(client):
 
     # 2. Accessing protected backoffice endpoints is blocked with 403
     blocked_resp = client.get(
-        "/api/dashboard/summary",
+        "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert blocked_resp.status_code == 403
@@ -130,7 +130,7 @@ def test_admin_can_approve_pending_user_and_grant_access(client):
 
     # User now has access to the protected route!
     access_resp = client.get(
-        "/api/dashboard/summary",
+        "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert access_resp.status_code == 200
@@ -177,7 +177,7 @@ def test_rejected_user_is_blocked(client):
 
     # Request rejected
     resp = client.get(
-        "/api/dashboard/summary",
+        "/api/dashboard/stats",
         headers={"Authorization": f"Bearer {user_token}"},
     )
     assert resp.status_code == 403

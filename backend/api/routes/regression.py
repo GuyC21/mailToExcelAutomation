@@ -12,22 +12,24 @@ under ``data/regression_suite/`` – and one URL namespace (``/api/regression``)
       (labeling) page: without it, growing the suite means a developer
       hand-writing JSON files.
 """
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from api.dependencies.byok import BYOKCredentials, get_byok_credentials
+from api.rate_limit import RateLimiter
 from api.uploads import MB, read_upload_or_413
 from config import get_settings
 from database import get_db
 from models.prompt import PromptVersion
 from models.regression import RegressionRun
-from repositories.prompt_repository import get_active_prompt
+from repositories import prompt_repository as prompt_repo
+from repositories import regression_repository as regression_repo
 from schemas.extraction import DocumentExtraction
 from schemas.regression import (
     RegressionCaseComparison,
@@ -35,6 +37,7 @@ from schemas.regression import (
     RegressionCaseSaveResult,
     RegressionCaseSummary,
     RegressionCompareResponse,
+    RegressionResponse,
     RegressionRunDeleteResult,
     RegressionRunDetail,
     RegressionRunListResponse,
@@ -55,15 +58,10 @@ from services.regression.runner import RegressionProviderUnavailableError, Regre
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_run_rate_limit = RateLimiter(max_requests=15, window_seconds=60)
 
 
-class RegressionResponse(BaseModel):
-    """Response schema for a regression test run."""
-    success: bool
-    data: Dict[str, Any]
-    error: str | None = None
-
-@router.post("/run", response_model=RegressionResponse)
+@router.post("/run", response_model=RegressionResponse, dependencies=[Depends(_run_rate_limit)])
 async def run_regression_suite(
     prompt_id: Optional[int] = Query(None, description="Prompt version to evaluate; defaults to the active prompt."),
     byok: BYOKCredentials = Depends(get_byok_credentials),
@@ -88,11 +86,11 @@ async def run_regression_suite(
             provider configured, 500 if the runner itself crashes.
     """
     if prompt_id is not None:
-        prompt = (await db.execute(select(PromptVersion).where(PromptVersion.id == prompt_id))).scalars().first()
+        prompt = await prompt_repo.get_prompt_by_id(db, prompt_id)
         if prompt is None:
             raise HTTPException(status_code=404, detail=f"פרומפט {prompt_id} לא נמצא")
     else:
-        prompt = await get_active_prompt(db)
+        prompt = await prompt_repo.get_active_prompt(db)
         if prompt is None:
             raise HTTPException(status_code=409, detail="אין פרומפט פעיל. יש לבחור פרומפט להרצה.")
 
@@ -109,7 +107,7 @@ async def run_regression_suite(
         report = await runner.run()
     except Exception as error:
         logger.exception("Regression run failed")
-        raise HTTPException(status_code=500, detail=str(error)) from error
+        raise HTTPException(status_code=500, detail="שגיאה פנימית בהרצת חבילת הרגרסיה") from error
 
     run = await _persist_run(report, prompt, db)
 
@@ -126,19 +124,25 @@ async def _persist_run(report, prompt: PromptVersion, db: AsyncSession) -> Regre
     Never recomputes anything: the scoring formula is untouched by this.
     """
     summary = report.to_dict()["summary"]
-    run = RegressionRun(
-        prompt_version_id=prompt.id, prompt_name=prompt.name, prompt_is_active=bool(prompt.is_active),
-        suite_dir=report.suite_dir, generated_at=report.generated_at, pass_threshold=report.pass_threshold,
-        providers=report.providers, warnings=report.warnings,
-        total=summary["total"], passed=summary["passed"], failed=summary["failed"], scored=summary["scored"],
-        coverage=summary["coverage"], average_score=summary["average_score"],
+    return await regression_repo.create_run(
+        db,
+        prompt_version_id=prompt.id,
+        prompt_name=prompt.name,
+        prompt_is_active=bool(prompt.is_active),
+        suite_dir=report.suite_dir,
+        generated_at=report.generated_at,
+        pass_threshold=report.pass_threshold,
+        providers=report.providers,
+        warnings=report.warnings,
+        total=summary["total"],
+        passed=summary["passed"],
+        failed=summary["failed"],
+        scored=summary["scored"],
+        coverage=summary["coverage"],
+        average_score=summary["average_score"],
         scored_average_score=summary["scored_average_score"],
         results=[r.to_dict() for r in report.results],
     )
-    db.add(run)
-    await db.commit()
-    await db.refresh(run)
-    return run
 
 
 # ---------------------------------------------------------------------------
@@ -162,15 +166,12 @@ async def list_runs(
         RegressionRunListResponse: Run summaries (no per-case detail - use
             ``GET /runs/{run_id}`` for that).
     """
-    stmt = select(RegressionRun).order_by(RegressionRun.id.desc()).limit(limit)
-    if prompt_id is not None:
-        stmt = stmt.where(RegressionRun.prompt_version_id == prompt_id)
-    rows = (await db.execute(stmt)).scalars().all()
+    rows = await regression_repo.list_runs(db, prompt_id=prompt_id, limit=limit)
     return RegressionRunListResponse(runs=[RegressionRunSummary.from_run(row) for row in rows])
 
 
 async def _get_run_or_404(run_id: int, db: AsyncSession) -> RegressionRun:
-    run = (await db.execute(select(RegressionRun).where(RegressionRun.id == run_id))).scalars().first()
+    run = await regression_repo.get_run_by_id(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"הרצה {run_id} לא נמצאה")
     return run
@@ -281,8 +282,7 @@ async def delete_run(run_id: int, db: AsyncSession = Depends(get_db)) -> Regress
     Raises:
         HTTPException: 404 if no such run exists.
     """
-    await db.delete(await _get_run_or_404(run_id, db))
-    await db.commit()
+    await regression_repo.delete_run(db, await _get_run_or_404(run_id, db))
     return RegressionRunDeleteResult(success=True)
 
 
@@ -298,7 +298,8 @@ async def list_cases() -> List[RegressionCaseSummary]:
         List[RegressionCaseSummary]: One entry per paired
             (document, ``*_expected.json``) case, for the תיוג page's case list.
     """
-    return [RegressionCaseSummary(**case.to_dict()) for case in list_labeled_cases()]
+    cases = await asyncio.to_thread(list_labeled_cases)
+    return [RegressionCaseSummary(**case.to_dict()) for case in cases]
 
 
 @router.get("/cases/{case_name}", response_model=RegressionCaseSummary)
@@ -315,7 +316,7 @@ async def get_case(case_name: str) -> RegressionCaseSummary:
         HTTPException: If the name is unusable (400) or no such case exists (404).
     """
     try:
-        case = get_labeled_case(case_name)
+        case = await asyncio.to_thread(get_labeled_case, case_name)
     except InvalidCaseNameError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except CaseNotFoundError as error:
@@ -338,7 +339,7 @@ async def get_case_document_file(case_name: str) -> FileResponse:
         HTTPException: If the name is unusable (400) or no such document exists (404).
     """
     try:
-        path, mime_type = get_case_document(case_name)
+        path, mime_type = await asyncio.to_thread(get_case_document, case_name)
     except InvalidCaseNameError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except CaseNotFoundError as error:
@@ -392,7 +393,7 @@ async def save_case(
     filename = file.filename if file is not None else None
 
     try:
-        case, warnings = save_labeled_case(case_name, filename, content, expected)
+        case, warnings = await asyncio.to_thread(save_labeled_case, case_name, filename, content, expected)
     except InvalidCaseNameError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except UnsupportedLabelDocumentError as error:
@@ -418,7 +419,7 @@ async def delete_case(case_name: str) -> RegressionCaseDeleteResult:
         HTTPException: If the name is unusable (400) or no such case exists (404).
     """
     try:
-        removed = delete_labeled_case(case_name)
+        removed = await asyncio.to_thread(delete_labeled_case, case_name)
     except InvalidCaseNameError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     if not removed:

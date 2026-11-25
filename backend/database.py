@@ -3,6 +3,8 @@
 Adapts automatically between asyncpg (standard in Docker/Linux) and psycopg (standard
 on Windows hosts) to provide zero-friction local execution without installing extra drivers.
 """
+from collections.abc import AsyncGenerator
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
@@ -28,7 +30,11 @@ async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit
 Base = declarative_base()
 
 
-async def get_db():
-    """Yields a request-scoped database session."""
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Yields a request-scoped asynchronous database session.
+
+    Yields:
+        An active SQLAlchemy ``AsyncSession`` closed automatically on exit.
+    """
     async with async_session() as session:
         yield session

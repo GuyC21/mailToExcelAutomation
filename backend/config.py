@@ -21,9 +21,12 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     # Ordered fallback chain. Free-tier quotas are per model, so falling back to
     # a sibling model on 429/404 keeps the pipeline alive during demos.
-    gemini_models: str = "gemini-3.8-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3-flash,gemini-2.5-flash,gemini-2.5-flash-lite"
+    gemini_models: str = "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.0-flash"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+
+    # --- CORS -------------------------------------------------------------
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # --- Storage ----------------------------------------------------------
     data_dir: str = "data"
@@ -46,10 +49,12 @@ class Settings(BaseSettings):
     # --- Security ---------------------------------------------------------
     # When set, inbound-email webhooks must send header ``X-Inbound-Token``.
     inbound_email_token: str = ""
-    # When set, every Backoffice API route requires header ``X-API-Key`` (or
-    # ``?api_key=`` for plain links such as downloads / previews). Empty keeps
-    # the local-demo behaviour; set it before exposing the API beyond localhost.
+    # Optional shared secret for headless scripts (header ``X-API-Key`` or
+    # ``?api_key=``). Backoffice UI users authenticate via Supabase JWTs.
     backoffice_api_key: str = ""
+    # Strictly for offline pytest E2E fixtures where Supabase/secrets are empty.
+    # NEVER set true in deployed or local non-test environments.
+    auth_disabled_for_tests: bool = False
 
     # --- Supabase Identity & Auth -----------------------------------------
     supabase_url: str = ""
@@ -62,6 +67,11 @@ class Settings(BaseSettings):
     def gemini_model_chain(self) -> List[str]:
         """``GEMINI_MODELS`` (comma separated) as an ordered list."""
         return [m.strip() for m in self.gemini_models.split(",") if m.strip()]
+
+    @property
+    def cors_origin_list(self) -> List[str]:
+        """``CORS_ORIGINS`` (comma separated) as a cleaned list of allowed origins."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def has_real_provider(self) -> bool:

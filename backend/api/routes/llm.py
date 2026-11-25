@@ -5,41 +5,18 @@ before triggering resource-intensive document extraction workflows.
 """
 import asyncio
 import logging
-from typing import Literal
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException
 
+from api.rate_limit import RateLimiter
 from config import get_settings
+from schemas.llm import KeyVerifyRequest, KeyVerifyResponse
 from services.extraction.extractor import mask_api_key
 from services.extraction.providers.base import short_error
 
 router = APIRouter()
 logger = logging.getLogger("billingstream.llm")
-
-
-class KeyVerifyRequest(BaseModel):
-    """Payload for verifying an LLM API key."""
-
-    provider: Literal["gemini", "openai"] = Field(
-        ...,
-        description="Target LLM provider ('gemini' or 'openai')",
-    )
-    api_key: str = Field(
-        ...,
-        min_length=5,
-        max_length=256,
-        description="The raw API key to test.",
-    )
-
-
-class KeyVerifyResponse(BaseModel):
-    """Response payload detailing verification outcome."""
-
-    valid: bool
-    provider: str
-    model: str
-    message: str
+_verify_rate_limit = RateLimiter(max_requests=20, window_seconds=60)
 
 
 def _verify_gemini_sync(api_key: str) -> str:
@@ -52,16 +29,21 @@ def _verify_gemini_sync(api_key: str) -> str:
         The primary model name confirmed.
 
     Raises:
+        RuntimeError: If no models are accessible for the key.
         Exception: If key authentication or network ping fails.
     """
     import google.generativeai as genai
+    from services.extraction.providers.gemini_provider import _GENAI_LOCK
 
-    genai.configure(api_key=api_key)
-    # list_models() performs an authenticated query against the Google API
-    # without consuming generation tokens.
-    model_iter = genai.list_models()
-    # Pull first model name to verify response is accessible
-    first_model = next(iter(model_iter))
+    with _GENAI_LOCK:
+        genai.configure(api_key=api_key)
+        # list_models() performs an authenticated query against the Google API
+        # without consuming generation tokens.
+        model_iter = genai.list_models()
+        # Pull first model name safely to verify response is accessible
+        first_model = next(iter(model_iter), None)
+    if first_model is None:
+        raise RuntimeError("לא נמצאו מודלים זמינים עבור מפתח זה")
     settings = get_settings()
     primary = settings.gemini_model_chain[0] if settings.gemini_model_chain else first_model.name
     return primary
@@ -86,7 +68,7 @@ def _verify_openai_sync(api_key: str) -> str:
     return get_settings().openai_model
 
 
-@router.post("/verify-key", response_model=KeyVerifyResponse)
+@router.post("/verify-key", response_model=KeyVerifyResponse, dependencies=[Depends(_verify_rate_limit)])
 async def verify_llm_key(payload: KeyVerifyRequest) -> KeyVerifyResponse:
     """Validates an LLM API key by performing an authenticated metadata ping.
 
@@ -121,14 +103,16 @@ async def verify_llm_key(payload: KeyVerifyRequest) -> KeyVerifyResponse:
             model=confirmed_model,
             message=msg,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         err_text = short_error(exc)
         logger.warning("Key verification failed for %s (%s): %s", provider, masked, err_text)
-        
-        detail_msg = f"אימות מפתח {provider.capitalize()} נכשל: {err_text}"
+
+        detail_msg = "אימות מפתח ה-API נכשל. נא לוודא שהמפתח תקין ובעל הרשאות מתאימות."
         if "401" in err_text or "unauthenticated" in err_text.lower() or "invalid_api_key" in err_text.lower():
             detail_msg = f"מפתח {provider.capitalize()} אינו תקין או שפג תוקפו. נא לוודא שהעתקת את המפתח הנכון."
         elif "429" in err_text or "quota" in err_text.lower():
-            detail_msg = f"המפתח תקין אך חרג ממכסת ה-API (Quota Exceeded / 429)."
+            detail_msg = "המפתח תקין אך חרג ממכסת ה-API (Quota Exceeded / 429)."
 
         raise HTTPException(status_code=400, detail=detail_msg) from exc

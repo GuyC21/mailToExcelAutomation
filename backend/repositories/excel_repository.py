@@ -82,13 +82,14 @@ class ExcelRepository:
 
     def read_identity(self) -> Optional[str]:
         """The identity token stamped on the workbook (None if absent/unstamped)."""
-        if not os.path.exists(self.file_path):
-            return None
-        workbook = load_workbook(self.file_path, read_only=True)
-        try:
-            return workbook.properties.identifier or None
-        finally:
-            workbook.close()
+        with self._lock:
+            if not os.path.exists(self.file_path):
+                return None
+            workbook = load_workbook(self.file_path, read_only=True)
+            try:
+                return workbook.properties.identifier or None
+            finally:
+                workbook.close()
 
     def replace_with_new(self, identity: str, reason: str) -> Optional[str]:
         """Archives the current workbook (if any) and creates an empty one.
@@ -253,19 +254,20 @@ class ExcelRepository:
     # ---- reads -----------------------------------------------------------
     def preview(self, limit: int = 10) -> dict:
         """Latest document rows (newest first) and per-status counts."""
-        if not os.path.exists(self.file_path):
-            return {"headers": [], "rows": [], "counts": {}, "total": 0, "updated_at": None}
-        workbook = load_workbook(self.file_path, read_only=True)
-        try:
-            sheet = workbook[DOCUMENTS_SHEET]
-            rows = list(sheet.iter_rows(values_only=True))
-        finally:
-            workbook.close()
+        with self._lock:
+            if not os.path.exists(self.file_path):
+                return {"headers": [], "rows": [], "counts": {}, "total": 0, "updated_at": None}
+            workbook = load_workbook(self.file_path, read_only=True)
+            try:
+                sheet = workbook[DOCUMENTS_SHEET]
+                rows = list(sheet.iter_rows(values_only=True))
+            finally:
+                workbook.close()
+            updated = datetime.fromtimestamp(os.path.getmtime(self.file_path)).isoformat(timespec="seconds")
         headers, body = list(rows[0]), rows[1:]
         status_index = _STATUS_COL - 1
         counts = {code: sum(1 for r in body if r[status_index] == label) for code, label in STATUS_LABELS.items()}
         latest = [[self._jsonable(v) for v in row] for row in reversed(body[-limit:])]
-        updated = datetime.fromtimestamp(os.path.getmtime(self.file_path)).isoformat(timespec="seconds")
         return {"headers": headers, "rows": latest, "counts": counts, "total": len(body), "updated_at": updated}
 
     @staticmethod

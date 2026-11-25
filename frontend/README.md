@@ -1,55 +1,51 @@
 # BillingStream Frontend (Backoffice)
 
-The frontend is a React Single Page Application (SPA) built with Vite and Tailwind CSS. It serves as the internal Backoffice UI for the finance and operations teams to monitor the system, review failed AI extractions, manage prompts, and run regression tests.
+The frontend is a React Single Page Application (SPA) built with Vite and Tailwind CSS v4. It serves as the internal Backoffice UI for finance, operations, and admin teams to monitor extractions, review/correct flagged documents, manage prompts, run regression benchmarks, and approve users.
 
 ## Tech Stack
-- **Framework**: React 18
-- **Build Tool**: Vite (for fast HMR and optimized builds)
-- **Styling**: Tailwind CSS
-- **Layout**: Right-to-Left (RTL) out of the box, optimized for the Hebrew language interface.
+- **Framework**: React 19 + React Router v7
+- **Build Tool & Linter**: Vite 8 + `oxlint`
+- **Styling**: Tailwind CSS v4 + Recharts 3
+- **Auth SDK**: `@supabase/supabase-js` v2 (Supabase GoTrue JWT + ephemeral BYOK via `sessionStorage`)
+- **Layout**: Right-to-Left (RTL) out of the box, optimized for a Hebrew-first interface across mobile, tablet, and desktop viewports.
 
-## Project Structure
+## Project Structure (`<= 150` lines per file, Orchestrator pattern)
 
-```
+```text
 frontend/
 ├── src/
-│   ├── api/          # Axios/fetch wrappers communicating with the FastAPI backend
-│   ├── components/   # Reusable UI widgets (Modals, Forms, Cards) organized by feature
-│   ├── layouts/      # Global layout wrappers (Sidebar, Header, Main content area)
-│   ├── pages/        # Top-level route components
-│   ├── App.jsx       # Routing definitions and global state setup
-│   └── main.jsx      # React DOM entry point
-├── public/           # Static assets
+│   ├── api/          # API fetch/Blob wrappers (client.js) and Supabase client setup
+│   ├── components/   # Feature-grouped UI widgets (admin, auth, byok, dashboard, layout, regression, review, sandbox)
+│   ├── context/      # Global providers (AuthContext, BYOKContext) and shared React Context objects
+│   ├── hooks/        # Domain custom hooks encapsulating network calls and stateful lifecycles
+│   ├── pages/        # Top-level route Orchestrators (subscribe to hooks, compose components)
+│   └── utils/        # Pure formatters, BYOK storage helpers, auth translation, and form mappers
+├── public/           # Static public directory
 └── package.json      # Dependencies and scripts
 ```
 
 ## Key Pages
 
-- **Dashboard (`DashboardPage.jsx`)**: Displays high-level metrics (total documents processed, success vs failure rates, total financial volume). It distinguishes between operational data (real emails) and test data (sandbox uploads).
-- **Sandbox (`SandboxPage.jsx`)**: Allows users to manually drag-and-drop sample PDFs or images into the system to test the active AI extraction pipeline on the fly.
-- **Review (`ReviewPage.jsx`)**: Shows a table of all processed documents. Users can filter by status (e.g., `NEEDS_REVIEW` or `FAILED`). When clicking a document, a split-screen view opens: the original PDF on one side, and the extracted data form on the other, allowing human operators to correct the AI's mistakes.
-- **Regression Dashboard (`RegressionPage.jsx`)**: The command center for prompt testing. Users can select a prompt version, click "Run Suite", and view the detailed scoring report to see if the new prompt improved or degraded performance on historical documents.
-- **Labeling (תיוג) (`LabelingPage.jsx`)**: The UI for adding new ground-truth documents to the regression suite. Users upload a difficult PDF and manually transcribe its exact values. This saves an expected JSON file on the backend, making the document a permanent part of the automated regression tests.
-- **Prompts Management**: Handled via modals and cards (e.g., `PromptForm.jsx`, `PromptCard.jsx`). Allows the finance team to adjust the "Business Prompt" (the specific instructions given to the AI) without writing code.
-
-## Component Architecture
-
-Components are built to be self-contained and heavily utilize Tailwind for styling.
-- **Layouts**: The UI relies on a responsive, RTL sidebar and top-nav layout.
-- **Modals**: Extensively used for detailed views (`ViewModal.jsx`, `HistoryModal.jsx`) to avoid unnecessary page navigation and keep context.
+- **Auth & Access (`LoginPage.jsx`, `RegisterPage.jsx`, `PendingApprovalPage.jsx`, `UserManagementPage.jsx`)**: Email/password login and signup via Supabase Auth, pending-approval holding view, and admin user lifecycle console (`APPROVED` / `REJECTED` / `SUSPENDED`).
+- **Dashboard (`DashboardPage.jsx`)**: Per-currency KPIs, operational vs test filtering (`includeTests`), status/channel/provider breakdowns, and authenticated Excel export/sync.
+- **Sandbox (`SandboxPage.jsx`)**: Single-file upload and multi-format simulated inbound email composer with user-scoped in-flight job polling and live Excel preview.
+- **Review (`ReviewPage.jsx`)**: Filterable document queue with authenticated Blob PDF/image previews (no query-string JWT leaks) and editable extraction fields with live mathematical revalidation.
+- **Regression (`RegressionPage.jsx`)**: Run benchmark suites against active or draft prompts (using BYOK keys), inspect persisted run history, and compare two runs side by side (A/B).
+- **Labeling (`LabelingPage.jsx`)**: Transcribe and save paired ground-truth document + `_expected.json` cases directly to the backend regression suite.
+- **Prompts (`HomePage.jsx`)**: Create, duplicate, activate, AI-enhance (BYOK), and inspect composed System Envelope prompts.
 
 ## Local Development
 
-1. Ensure the backend is running.
-2. Install dependencies:
+1. Ensure the FastAPI backend is running.
+2. Configure environment variables in `frontend/.env` as needed:
+   - `VITE_API_URL` (default `http://localhost:8000`)
+   - `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (when Supabase auth is enabled)
+3. Install dependencies and run dev/checks:
    ```bash
    cd frontend
    npm install
-   ```
-3. Start the Vite dev server:
-   ```bash
    npm run dev
+   npm run lint
+   npm run build
    ```
 4. Access the UI at `http://localhost:5173`.
-
-*Note: The Backoffice relies on `VITE_API_KEY` to authenticate against the backend if the backend has `BACKOFFICE_API_KEY` configured in its `.env`.*

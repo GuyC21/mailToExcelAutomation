@@ -1,10 +1,12 @@
 import React from 'react';
 import { X, ArrowUp, ArrowDown, Minus, CheckCircle, AlertTriangle, HelpCircle } from 'lucide-react';
 import ScoreGauge from './ScoreGauge';
+import { formatDateTime } from '../../utils/format';
 
-const dateFormatter = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' });
-
-/** Small +N.N / -N.N badge; green when positive, red when negative, gray at 0. */
+/**
+ * Renders a signed delta badge (+N.N / -N.N).
+ * @param {{ value: number|null|undefined, suffix?: string }} props
+ */
 function Delta({ value, suffix = '' }) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return <span className="text-gray-400">—</span>;
   const n = Number(value);
@@ -18,12 +20,16 @@ function Delta({ value, suffix = '' }) {
   );
 }
 
+/**
+ * Summary card for one side (A or B) of an A/B run comparison.
+ * @param {{ run: object, label: string }} props
+ */
 function RunSummaryCard({ run, label }) {
   return (
     <div className="bg-white p-4 rounded-lg shadow border border-gray-200">
       <p className="text-xs font-bold text-gray-400 uppercase">{label}</p>
       <p className="font-semibold text-gray-800 mt-1">{run.prompt_name || '—'}{run.prompt_is_active && ' (פעיל)'}</p>
-      <p className="text-xs text-gray-500">#{run.id} · {dateFormatter.format(new Date(run.created_at))}</p>
+      <p className="text-xs text-gray-500">#{run.id} · {formatDateTime(run.created_at)}</p>
       <div className="grid grid-cols-3 gap-2 mt-3 text-center">
         <div>
           <p className="text-xs text-gray-400">עברו</p>
@@ -50,6 +56,10 @@ const STATUS_META = {
   only_b: { label: 'רק ב-B', icon: HelpCircle, className: 'text-amber-600 bg-amber-50 border-amber-100' },
 };
 
+/**
+ * Cell rendering one case's score and errors in Run A or Run B.
+ * @param {{ side: object|null }} props
+ */
 function CaseSideCell({ side }) {
   if (!side) return <span className="text-gray-300">—</span>;
   return (
@@ -66,10 +76,10 @@ function CaseSideCell({ side }) {
 }
 
 /**
- * Side-by-side A/B comparison of two persisted regression runs: headline
- * metric deltas plus a per-case table (matched by case name).
- * `comparison` is the API's `GET /api/regression/runs/compare` response.
- * @param {{comparison: object, onClose: () => void}} props
+ * Side-by-side A/B comparison of two persisted regression runs.
+ * @component
+ * @param {{ comparison: object, onClose: () => void }} props
+ * @returns {JSX.Element}
  */
 export default function RunCompareView({ comparison, onClose }) {
   const { run_a: runA, run_b: runB, cases, summary_delta: delta } = comparison;
@@ -78,7 +88,7 @@ export default function RunCompareView({ comparison, onClose }) {
     <div className="space-y-4 bg-indigo-50/40 border border-indigo-100 rounded-lg p-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-bold text-indigo-900">השוואת A/B</h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-gray-700" aria-label="סגור השוואה">
+        <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700" aria-label="סגור השוואה">
           <X className="w-5 h-5" />
         </button>
       </div>
@@ -109,7 +119,7 @@ export default function RunCompareView({ comparison, onClose }) {
           </thead>
           <tbody>
             {cases.map((c) => {
-              const meta = STATUS_META[c.status];
+              const meta = STATUS_META[c.status] || STATUS_META.unchanged;
               const Icon = meta.icon;
               return (
                 <tr key={c.name} className="border-t border-gray-100">

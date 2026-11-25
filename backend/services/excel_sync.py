@@ -27,7 +27,7 @@ from sqlalchemy.future import select
 from config import get_settings
 from database import async_session
 from models.app_metadata import AppMetadata
-from models.ingestion import DocumentIngestion
+from models.ingestion import DocumentIngestion, STATUS_PROCESSING
 from repositories.excel_repository import ExcelLockedError, ExcelRepository
 
 logger = logging.getLogger(__name__)
@@ -142,8 +142,14 @@ def _bind_workbook(repository: ExcelRepository, identity: str) -> bool:
 
 
 async def _pending_count(db: AsyncSession) -> int:
-    result = await db.execute(select(func.count()).select_from(DocumentIngestion)
-                              .where(DocumentIngestion.excel_synced.is_(False)))
+    result = await db.execute(
+        select(func.count())
+        .select_from(DocumentIngestion)
+        .where(
+            DocumentIngestion.excel_synced.is_(False),
+            DocumentIngestion.status != STATUS_PROCESSING,
+        )
+    )
     return int(result.scalar() or 0)
 
 
@@ -171,13 +177,22 @@ async def sync_pending(db: AsyncSession) -> dict:
         logger.warning("Excel sync postponed: %s", error)
         return {"synced": [], "pending": await _pending_count(db), "error": str(error)}
     if rebuilt:
-        # A new workbook starts empty: replay the whole history, not just
-        # what happened to be pending (the old file was archived, not merged).
-        await db.execute(update(DocumentIngestion).values(excel_synced=False))
+        # A new workbook starts empty: replay the whole finished history, not just
+        # what happened to be pending (never include in-flight PROCESSING placeholders).
+        await db.execute(
+            update(DocumentIngestion)
+            .where(DocumentIngestion.status != STATUS_PROCESSING)
+            .values(excel_synced=False)
+        )
         await db.commit()
 
     result = await db.execute(
-        select(DocumentIngestion).where(DocumentIngestion.excel_synced.is_(False)).order_by(DocumentIngestion.id)
+        select(DocumentIngestion)
+        .where(
+            DocumentIngestion.excel_synced.is_(False),
+            DocumentIngestion.status != STATUS_PROCESSING,
+        )
+        .order_by(DocumentIngestion.id)
     )
     pending = result.unique().scalars().all()
     if not pending:

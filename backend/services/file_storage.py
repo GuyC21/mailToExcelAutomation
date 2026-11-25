@@ -9,6 +9,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from config import get_settings
@@ -96,3 +97,46 @@ def store_document(filename: str, content: bytes) -> StoredDocument:
     with open(path, "wb") as handle:
         handle.write(content)
     return StoredDocument(original_filename=name, stored_path=path, mime_type=mime_type, size_bytes=len(content))
+
+
+def resolve_inbox_file(stored_path: Optional[str]) -> Optional[str]:
+    """Resolves a stored document path and verifies it exists inside ``inbox_dir``.
+
+    Prevents directory traversal or arbitrary local file read if a stored path
+    points outside the configured inbox directory, and avoids 500 errors when
+    the underlying file has already been removed from disk.
+
+    Args:
+        stored_path: Persisted file path recorded on ``DocumentIngestion``.
+
+    Returns:
+        The resolved absolute file path if safe and present, otherwise ``None``.
+    """
+    if not stored_path:
+        return None
+    inbox_root = Path(get_settings().inbox_dir).resolve()
+    try:
+        candidate = Path(stored_path).resolve()
+        candidate.relative_to(inbox_root)
+    except (OSError, ValueError):
+        return None
+    return str(candidate) if candidate.is_file() else None
+
+
+def delete_stored_document(stored_path: Optional[str]) -> bool:
+    """Safely removes a physical document file inside ``inbox_dir``.
+
+    Args:
+        stored_path: Persisted file path recorded on ``DocumentIngestion``.
+
+    Returns:
+        ``True`` if a file was removed, ``False`` if absent or outside ``inbox_dir``.
+    """
+    safe_path = resolve_inbox_file(stored_path)
+    if not safe_path:
+        return False
+    try:
+        os.remove(safe_path)
+        return True
+    except FileNotFoundError:
+        return False

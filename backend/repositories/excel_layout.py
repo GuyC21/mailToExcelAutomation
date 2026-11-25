@@ -22,6 +22,8 @@ CHANNEL_LABELS = {"email": "מייל נכנס", "sandbox": "העלאה ידני�
 
 
 class Column(NamedTuple):
+    """Descriptor mapping a document or charge-line record field to an Excel column."""
+
     header: str
     width: int
     value: Callable[[dict], Any]
