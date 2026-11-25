@@ -66,6 +66,43 @@ async def sync_supabase_app_metadata(user_id: str, status: UserStatus, role: Use
         return False
 
 
+async def change_user_status(
+    db: AsyncSession,
+    user_id: str,
+    status: UserStatus,
+    approver_id: str,
+) -> Optional[UserProfile]:
+    """Transitions a user's approval lifecycle status and syncs metadata with Supabase.
+
+    Prevents administrators from locking themselves out by rejecting or suspending
+    their own active account.
+
+    Args:
+        db: Active asynchronous database session.
+        user_id: Unique UUID of the target user.
+        status: Target ``UserStatus`` transition.
+        approver_id: UUID of the administrator performing the change.
+
+    Returns:
+        The updated ``UserProfile`` instance, or ``None`` if target user was not found.
+
+    Raises:
+        ValueError: If an administrator attempts to reject or suspend their own account.
+    """
+    if user_id == approver_id and status != UserStatus.APPROVED:
+        raise ValueError("מנהל מערכת אינו יכול להשעות או לדחות את חשבונו האישי")
+
+    updated_user = await user_repo.update_user_status(
+        db,
+        user_id=user_id,
+        status=status,
+        approver_id=approver_id,
+    )
+    if updated_user:
+        await sync_supabase_app_metadata(user_id, updated_user.status, updated_user.role)
+    return updated_user
+
+
 async def approve_user(
     db: AsyncSession,
     user_id: str,
@@ -81,15 +118,7 @@ async def approve_user(
     Returns:
         The updated UserProfile instance, or None if user not found.
     """
-    updated_user = await user_repo.update_user_status(
-        db,
-        user_id=user_id,
-        status=UserStatus.APPROVED,
-        approver_id=approver_id,
-    )
-    if updated_user:
-        await sync_supabase_app_metadata(user_id, updated_user.status, updated_user.role)
-    return updated_user
+    return await change_user_status(db, user_id=user_id, status=UserStatus.APPROVED, approver_id=approver_id)
 
 
 async def reject_user(
@@ -107,15 +136,7 @@ async def reject_user(
     Returns:
         The updated UserProfile instance, or None if user not found.
     """
-    updated_user = await user_repo.update_user_status(
-        db,
-        user_id=user_id,
-        status=UserStatus.REJECTED,
-        approver_id=approver_id,
-    )
-    if updated_user:
-        await sync_supabase_app_metadata(user_id, updated_user.status, updated_user.role)
-    return updated_user
+    return await change_user_status(db, user_id=user_id, status=UserStatus.REJECTED, approver_id=approver_id)
 
 
 async def list_users(
@@ -132,3 +153,32 @@ async def list_users(
         List of UserProfile instances.
     """
     return await user_repo.list_user_profiles(db, status_filter=status_filter)
+
+
+async def sync_user_display_name(
+    db: AsyncSession,
+    user: UserProfile,
+    full_name: Optional[str],
+) -> UserProfile:
+    """Safely updates a user's display name across persistent and transient identities.
+
+    Transient identities (``system-api-key``, ``local-demo-user``) are never
+    attached to SQLAlchemy sessions, so updating them in-memory prevents
+    ``InvalidRequestError`` on ``db.refresh()``.
+
+    Args:
+        db: Active asynchronous database session.
+        user: Authenticated ``UserProfile`` resolved for the current request.
+        full_name: Requested display name from registration profile sync.
+
+    Returns:
+        The updated persistent or transient ``UserProfile``.
+    """
+    clean_name = (full_name or "").strip()
+    if not clean_name or clean_name == user.full_name:
+        return user
+    if user.id in {"system-api-key", "local-demo-user"}:
+        user.full_name = clean_name
+        return user
+    updated = await user_repo.update_user_full_name(db, user_id=str(user.id), full_name=clean_name)
+    return updated or user

@@ -2,21 +2,13 @@ import { useEffect, useState } from 'react';
 import CaseList from '../components/labeling/CaseList';
 import DocumentPreview from '../components/labeling/DocumentPreview';
 import LabelForm from '../components/labeling/LabelForm';
+import ConfirmModal from '../components/ConfirmModal';
 import { useRegressionCases } from '../hooks/useRegressionCases';
 
 /**
  * LabelingPage ("תיוג") Component
  *
- * Lets a person manually transcribe a document's fields to create or correct
- * a regression ground-truth case, instead of a developer hand-writing JSON
- * into `data/regression_suite/`. This is the write side of the regression
- * suite; `RegressionPage` (`/regression`) is the read/run side that scores
- * the AI's extraction against whatever gets saved here.
- *
- * The page itself only orchestrates: case selection lives here, all API
- * access is delegated to `useRegressionCases`, and the form's own field
- * state lives inside `LabelForm` (remounted via `key` on case switch).
- *
+ * Orchestrates ground-truth case selection, previewing, creation/updating, and deletion.
  * @component
  * @returns {JSX.Element}
  */
@@ -31,8 +23,11 @@ export default function LabelingPage() {
   const [saveError, setSaveError] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [successMessage, setSuccessMessage] = useState(null);
+  const [caseToDelete, setCaseToDelete] = useState(null);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const resetFeedback = () => {
     setSaveError(null);
@@ -70,9 +65,6 @@ export default function LabelingPage() {
       const result = await saveCase({ caseName, file, expected });
       setWarnings(result.warnings || []);
       setSuccessMessage(`התיוג "${result.case.name}" נשמר בהצלחה בחבילת הרגרסיה.`);
-      // Seed the (re-keyed) form with what was actually stored *before* the
-      // selection changes, so it reopens populated - never blank - and a
-      // second save can't overwrite the ground truth with empty values.
       setInitialExpected(result.case.expected);
       setSelectedMimeType(result.case.mime_type);
       setCaseName(result.case.name);
@@ -86,8 +78,10 @@ export default function LabelingPage() {
     }
   };
 
-  const handleDelete = async (name) => {
-    if (!window.confirm(`למחוק את התיק "${name}"? הפעולה אינה הפיכה.`)) return;
+  const handleConfirmDelete = async () => {
+    if (!caseToDelete) return;
+    const name = caseToDelete;
+    setCaseToDelete(null);
     try {
       await deleteCase(name);
       if (selectedName === name) startNewCase();
@@ -114,7 +108,7 @@ export default function LabelingPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div className="lg:col-span-3 order-2 lg:order-1">
-          <CaseList cases={cases} selectedName={selectedName} onSelect={openCase} onNew={startNewCase} onDelete={handleDelete} />
+          <CaseList cases={cases} selectedName={selectedName} onSelect={openCase} onNew={startNewCase} onDelete={setCaseToDelete} />
         </div>
 
         <div className="lg:col-span-4 order-1 lg:order-2">
@@ -136,6 +130,16 @@ export default function LabelingPage() {
           />
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={Boolean(caseToDelete)}
+        title="מחיקת תיק רגרסיה"
+        message={`למחוק את התיק "${caseToDelete || ''}"? הפעולה אינה הפיכה.`}
+        confirmText="מחק"
+        cancelText="בטל"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setCaseToDelete(null)}
+      />
     </div>
   );
 }

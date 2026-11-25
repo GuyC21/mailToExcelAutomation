@@ -89,6 +89,7 @@ class LabeledCase:
     expected: dict
 
     def to_dict(self) -> dict:
+        """Serializes this labeled case to a JSON-compatible dictionary."""
         return {
             "name": self.name,
             "document_filename": self.document_filename,

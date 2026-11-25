@@ -15,12 +15,16 @@ The backend is organized into several key services:
 
 ## API Structure
 
-- `POST /api/email/inbound`: Endpoint for incoming mail webhooks.
-- `GET /api/documents`: Fetch processed documents.
-- `GET /api/prompts`: Manage the business prompt versions.
-- `GET /api/dashboard`: Aggregated metrics for the frontend.
-- `POST /api/excel/sync`: Force a synchronization of the DB to the Excel file.
-- `api/routes/regression.py`: Endpoints for managing and running regression tests.
+- `GET /api/auth/me`, `POST /api/auth/sync-profile`, `GET/PATCH /api/admin/users*`: Supabase JWT user sync and admin approval/suspension RBAC.
+- `POST /api/llm/verify-key`: Verify ephemeral BYOK Gemini or OpenAI credentials (`X-Gemini-API-Key` / `X-OpenAI-API-Key`).
+- `POST /api/email/inbound*`: Production webhook endpoints for incoming supplier emails (`X-Inbound-Token` or `X-API-Key`).
+- `POST /api/email/simulate*`: Sandbox email simulation endpoints (strictly isolated to BYOK or MockProvider).
+- `POST /api/ingestion/upload` & `GET /api/sandbox/*`: Single-document Sandbox upload and job-status polling scoped to the requesting user.
+- `GET/PATCH/DELETE /api/documents*`: Review, preview, correct (with business-rule revalidation), and delete processed documents.
+- `GET/POST/PUT/DELETE /api/prompts*`: Manage and AI-enhance business prompt versions.
+- `GET /api/dashboard/stats`: Aggregated per-currency operational/test metrics and failure counts.
+- `GET/POST /api/excel/*`: Live workbook preview, sync, rebuild, and XLSX download.
+- `GET/POST/DELETE /api/regression*`: Ground-truth labeling, regression suite runs, run history, and A/B comparisons.
 
 ---
 

@@ -157,3 +157,28 @@ async def update_user_status(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def update_user_full_name(
+    db: AsyncSession,
+    user_id: str,
+    full_name: str,
+) -> Optional[UserProfile]:
+    """Updates an existing user's display name in the database.
+
+    Args:
+        db: Active asynchronous database session.
+        user_id: Unique UUID string of the user profile.
+        full_name: Trimmed display name to persist.
+
+    Returns:
+        Refreshed ``UserProfile`` or ``None`` if no persistent row exists.
+    """
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return None
+    user.full_name = full_name
+    user.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(user)
+    return user

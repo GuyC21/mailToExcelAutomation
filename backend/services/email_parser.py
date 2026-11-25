@@ -59,15 +59,17 @@ def _ensure_identity(payload: InboundEmailPayload) -> InboundEmailPayload:
     return payload
 
 
-def parse_eml(raw: bytes) -> InboundEmailPayload:
+def parse_eml(raw: bytes, max_attachment_bytes: Optional[int] = None) -> InboundEmailPayload:
     """Parses a raw MIME message, decoding RFC 2047 Hebrew subjects/filenames.
 
     Handles native EML formats usually forwarded directly from mailboxes.
-    Decodes potentially complex multi-part structures and properly extracts 
-    base64/quoted-printable components.
+    Decodes potentially complex multi-part structures and properly extracts
+    base64/quoted-printable components while flagging oversized attachments.
 
     Args:
         raw (bytes): The raw bytes of the EML message.
+        max_attachment_bytes (Optional[int]): Optional per-attachment size cap;
+            attachments exceeding it are flagged ``oversized=True`` with empty content.
 
     Returns:
         InboundEmailPayload: A standardized payload representation of the email.
@@ -78,16 +80,29 @@ def parse_eml(raw: bytes) -> InboundEmailPayload:
     try:
         message = BytesParser(policy=policy.default).parsebytes(raw)
     except Exception as error:
-        raise EmailParseError(f"קובץ המייל אינו תקין: {error}") from error
+        raise EmailParseError("קובץ המייל אינו תקין או שאינו ניתן לפענוח") from error
     if not message.keys():
         raise EmailParseError("קובץ המייל ריק או אינו בפורמט MIME")
     body_part = message.get_body(preferencelist=("plain", "html"))
-    attachments = [
-        EmailAttachment(filename=part.get_filename() or "attachment.bin",
-                        content_type=part.get_content_type(),
-                        content=part.get_payload(decode=True) or b"")
-        for part in message.iter_attachments()
-    ]
+    attachments: List[EmailAttachment] = []
+    for part in message.iter_attachments():
+        raw_part = part.get_payload(decode=True) or b""
+        filename = part.get_filename() or "attachment.bin"
+        content_type = part.get_content_type()
+        if max_attachment_bytes is not None and len(raw_part) > max_attachment_bytes:
+            attachments.append(
+                EmailAttachment(
+                    filename=filename,
+                    content_type=content_type,
+                    content=b"",
+                    oversized=True,
+                    original_size=len(raw_part),
+                )
+            )
+            continue
+        attachments.append(
+            EmailAttachment(filename=filename, content_type=content_type, content=raw_part)
+        )
     return _ensure_identity(InboundEmailPayload(
         source_format="eml",
         message_id=message.get("Message-ID"),

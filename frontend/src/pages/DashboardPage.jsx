@@ -1,40 +1,34 @@
 import React, { useState } from 'react';
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { TrendingUp, FileText, AlertCircle, RefreshCw, Download } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
-import { apiUrl } from '../api/client';
-import { TrendingUp, FileText, AlertCircle, RefreshCw } from 'lucide-react';
-
-/**
- * Formats an amount in its own currency (never assumes shekels).
- * Falls back to "<amount> <code>" for codes Intl does not know.
- * @param {number} value
- * @param {string} currency - ISO-like code from the API, e.g. "ILS", "USD".
- */
-function formatMoney(value, currency) {
-  const amount = Number(value) || 0;
-  try {
-    return new Intl.NumberFormat('he-IL', { style: 'currency', currency, maximumFractionDigits: 2 }).format(amount);
-  } catch {
-    return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
-  }
-}
+import { downloadAuthenticatedFile } from '../api/client';
+import { formatMoney } from '../utils/format';
+import DashboardCharts from '../components/dashboard/DashboardCharts';
 
 /**
  * DashboardPage Component
- * 
- * Renders the main financial dashboard, providing a high-level overview of system 
- * performance and invoice processing metrics. It uses the `useDashboard` hook to 
- * fetch aggregated statistics.
- * 
- * The visual breakdown (KPIs, pie charts for status, bar charts for top suppliers) 
- * helps business users quickly identify bottlenecks or anomalies in the ingestion pipeline.
- * 
+ *
+ * Orchestrates financial KPI cards, status/supplier charts, and Excel export.
  * @component
- * @returns {JSX.Element} The rendered Dashboard page.
+ * @returns {JSX.Element}
  */
 export default function DashboardPage() {
   const [scope, setScope] = useState('operational');
+  const [downloadError, setDownloadError] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
   const { stats, loading, error, refresh } = useDashboard(scope);
+
+  const handleDownload = async () => {
+    setIsDownloading(true);
+    setDownloadError('');
+    try {
+      await downloadAuthenticatedFile('/api/excel/download', 'BillingStream_Master.xlsx');
+    } catch (err) {
+      setDownloadError(err.message || 'שגיאה בהורדת קובץ האקסל');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -47,7 +41,7 @@ export default function DashboardPage() {
   if (error) {
     return (
       <div className="bg-red-50 text-red-600 p-4 rounded-lg flex items-center gap-2">
-        <AlertCircle className="w-5 h-5" />
+        <AlertCircle className="w-5 h-5 flex-shrink-0" />
         <p>{error}</p>
       </div>
     );
@@ -58,34 +52,42 @@ export default function DashboardPage() {
       <header className="flex flex-wrap gap-4 justify-between items-center bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-blue-900">דאשבורד פיננסי</h1>
-          <p className="text-gray-500 mt-1">מבט על לביצועי המערכת וקליטת החשבוניות</p>
+          <p className="text-gray-500 mt-1 text-sm md:text-base">מבט על לביצועי המערכת וקליטת החשבוניות</p>
         </div>
-        <div className="flex flex-wrap gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center w-full sm:w-auto">
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value)}
-            className="border border-gray-300 rounded px-3 py-2 text-sm bg-white"
+            className="border border-gray-300 rounded px-3 py-2 text-sm bg-white flex-1 sm:flex-none"
             aria-label="היקף הנתונים"
           >
             <option value="operational">נתונים תפעוליים בלבד</option>
             <option value="all">כולל בדיקות (סנדבוקס / דמה)</option>
           </select>
-          <a
-            href={apiUrl('/api/excel/download')}
-            download
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm font-medium"
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={isDownloading}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition text-sm font-medium disabled:opacity-60"
           >
-            הורד אקסל מלא
-          </a>
-          <button 
+            <Download className="w-4 h-4" />
+            <span>{isDownloading ? 'מוריד...' : 'הורד אקסל מלא'}</span>
+          </button>
+          <button
+            type="button"
             onClick={refresh}
             className="p-2 text-gray-500 hover:bg-gray-100 rounded transition"
             title="רענן נתונים"
+            aria-label="רענן נתונים"
           >
             <RefreshCw className="w-5 h-5" />
           </button>
         </div>
       </header>
+
+      {downloadError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm">{downloadError}</div>
+      )}
 
       {scope === 'operational' && stats.excluded_test_documents > 0 && (
         <div className="bg-blue-50 border border-blue-100 text-blue-800 p-3 rounded-lg text-sm">
@@ -99,7 +101,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex items-center justify-between">
           <div>
@@ -118,13 +119,11 @@ export default function DashboardPage() {
             <TrendingUp className="w-8 h-8" />
           </div>
         </div>
-        
+
         <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex items-center justify-between">
           <div>
             <p className="text-gray-500 text-sm font-medium">מסמכים שעובדו</p>
-            <h3 className="text-3xl font-bold text-gray-800 mt-1">
-              {stats.total_documents}
-            </h3>
+            <h3 className="text-3xl font-bold text-gray-800 mt-1">{stats.total_documents}</h3>
           </div>
           <div className="bg-blue-100 p-3 rounded-full text-blue-600">
             <FileText className="w-8 h-8" />
@@ -132,60 +131,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:h-[400px]">
-        {/* Status Distribution */}
-        <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex flex-col h-[300px] lg:h-full">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">התפלגות סטטוסים</h3>
-          <div className="flex-1 min-h-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={stats.status_distribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {stats.status_distribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Top Suppliers */}
-        <div className="bg-white p-6 rounded-lg shadow border border-gray-100 flex flex-col h-[300px] lg:h-full">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">
-            ספקים מובילים (לפי סכום{stats.top_suppliers_currency ? `, ${stats.top_suppliers_currency}` : ''})
-          </h3>
-          <div className="flex-1 min-h-0" dir="ltr">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={stats.top_suppliers}
-                margin={{ top: 5, right: 30, left: 10, bottom: 5 }}
-                layout="vertical"
-              >
-                <XAxis type="number" hide />
-                <YAxis 
-                  dataKey="name" 
-                  type="category" 
-                  width={140} 
-                  tick={{ fontSize: 11, fill: '#4b5563' }} 
-                />
-                <Tooltip formatter={(value) => formatMoney(value, stats.top_suppliers_currency || 'ILS')} />
-                <Bar dataKey="value" fill="#3b82f6" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
+      <DashboardCharts
+        statusDistribution={stats.status_distribution}
+        topSuppliers={stats.top_suppliers}
+        topSuppliersCurrency={stats.top_suppliers_currency}
+      />
     </div>
   );
 }

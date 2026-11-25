@@ -18,15 +18,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from api.dependencies.auth import require_approved_user
 from database import get_db
 from models.ingestion import DocumentIngestion, STATUS_PROCESSING
 from models.user import UserProfile
+from repositories import ingestion_repository as ingestion_repo
+from schemas.sandbox import ActiveJobResponse, JobResultResponse  # noqa: F401 (re-exported for tests)
 
 logger = logging.getLogger("billingstream.sandbox_status")
 router = APIRouter()
@@ -34,43 +33,6 @@ router = APIRouter()
 # A PROCESSING job older than this is treated as stale (the worker likely
 # crashed).  The frontend should stop showing a spinner for it.
 _STALENESS_WINDOW = timedelta(minutes=5)
-
-
-# ── Response DTOs (sanitized — no raw_response, no internal paths) ─────
-
-class ActiveJobResponse(BaseModel):
-    """Lightweight response indicating whether the caller has an in-flight job."""
-
-    active: bool
-    document_id: Optional[int] = None
-    filename: Optional[str] = None
-    channel: Optional[str] = None
-    email_id: Optional[int] = None
-
-
-class JobResultResponse(BaseModel):
-    """Full extraction result for a completed (or failed) job.
-
-    Mirrors ``IngestionResult`` but is intentionally a separate schema so the
-    status endpoint never accidentally leaks fields added to the ingestion
-    response in the future.
-    """
-
-    document_id: int
-    filename: str
-    channel: str
-    status: str
-    provider: Optional[str] = None
-    model: Optional[str] = None
-    prompt_version_id: Optional[int] = None
-    prompt_name: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
-    issues: List[Dict[str, Any]] = []
-    error: Optional[str] = None
-    email_id: Optional[int] = None
-    all_completed: bool = True
-    email: Optional[Dict[str, Any]] = None
-    all_results: Optional[List[Dict[str, Any]]] = None
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────
@@ -95,18 +57,8 @@ async def get_active_job(
         PROCESSING job exists, or ``active=False`` otherwise.
     """
     cutoff = datetime.now(timezone.utc) - _STALENESS_WINDOW
-    stmt = (
-        select(DocumentIngestion)
-        .where(and_(
-            DocumentIngestion.created_by_id == str(current_user.id),
-            DocumentIngestion.status == STATUS_PROCESSING,
-            DocumentIngestion.created_at >= cutoff,
-        ))
-        .order_by(DocumentIngestion.created_at.desc())
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    record = result.scalars().first()
+    user_id = str(current_user.id)
+    record = await ingestion_repo.get_active_user_job(db, user_id=user_id, cutoff=cutoff)
 
     if record:
         return ActiveJobResponse(
@@ -120,17 +72,7 @@ async def get_active_job(
     # If no job is currently PROCESSING, check if an ingestion completed
     # recently for this user (within the staleness window) so that refreshing
     # right after extraction finishes can restore the full results.
-    recent_stmt = (
-        select(DocumentIngestion)
-        .where(and_(
-            DocumentIngestion.created_by_id == str(current_user.id),
-            DocumentIngestion.created_at >= cutoff,
-        ))
-        .order_by(DocumentIngestion.created_at.desc())
-        .limit(1)
-    )
-    recent_res = await db.execute(recent_stmt)
-    recent = recent_res.scalars().first()
+    recent = await ingestion_repo.get_recent_user_job(db, user_id=user_id, cutoff=cutoff)
     if recent:
         return ActiveJobResponse(
             active=False,
@@ -185,29 +127,23 @@ async def get_job_result(
     Raises:
         HTTPException: 404 if the document does not exist or is not owned by the caller.
     """
-    stmt = select(DocumentIngestion).where(and_(
-        DocumentIngestion.id == document_id,
-        DocumentIngestion.created_by_id == str(current_user.id),
-    ))
-    result = await db.execute(stmt)
-    record = result.scalars().first()
+    user_id = str(current_user.id)
+    record = await ingestion_repo.get_owned_document(db, document_id=document_id, user_id=user_id)
 
     if not record:
         raise HTTPException(status_code=404, detail="המסמך לא נמצא.")
 
-    # Multi-file email handling: gather all sibling documents belonging to this email
+    # Multi-file email handling: gather all sibling documents belonging to this email & user
     all_results: List[Dict[str, Any]] = []
     all_completed = True
     email_data: Optional[Dict[str, Any]] = None
 
     if record.email_id is not None:
-        sibling_stmt = (
-            select(DocumentIngestion)
-            .where(DocumentIngestion.email_id == record.email_id)
-            .order_by(DocumentIngestion.id.asc())
+        siblings = await ingestion_repo.list_owned_email_siblings(
+            db,
+            email_id=record.email_id,
+            user_id=user_id,
         )
-        sibling_res = await db.execute(sibling_stmt)
-        siblings = sibling_res.scalars().all()
         all_results = [_serialize_single_doc(s) for s in siblings]
         all_completed = not any(s.status == STATUS_PROCESSING for s in siblings)
 

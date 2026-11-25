@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies.auth import require_approved_user
 from api.dependencies.byok import BYOKCredentials, get_byok_credentials
+from api.rate_limit import RateLimiter
 from api.uploads import MB, UploadTooLargeError, read_upload_limited
 from config import get_settings
 from database import get_db
@@ -30,7 +31,8 @@ from services.email_parser import EmailParseError, parse_eml, parse_multipart
 from services.ingestion_pipeline import NoActivePromptError, ingest_email
 
 logger = logging.getLogger("billingstream.simulation")
-router = APIRouter()
+_sim_rate_limit = RateLimiter(max_requests=60, window_seconds=60)
+router = APIRouter(dependencies=[Depends(_sim_rate_limit)])
 
 _MAX_EML_BYTES = 25 * 1024 * 1024
 
@@ -179,12 +181,19 @@ async def simulate_inbound_eml(
     Raises:
         HTTPException: 400 for malformed EML, 413 for files exceeding 25MB.
     """
+    settings = get_settings()
     try:
         content = await read_upload_limited(file, _MAX_EML_BYTES)
-        payload = parse_eml(content)
+        payload = parse_eml(content, max_attachment_bytes=settings.max_upload_mb * MB)
     except UploadTooLargeError as error:
         raise HTTPException(status_code=413, detail=str(error)) from error
     except EmailParseError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+    if len(payload.attachments) > settings.max_email_attachments:
+        raise HTTPException(
+            status_code=413,
+            detail=f"יותר מ-{settings.max_email_attachments} קבצים מצורפים במייל אחד",
+        )
 
     return await _process_simulation(db, payload, byok, user_id=str(_user.id))

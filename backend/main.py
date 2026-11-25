@@ -1,11 +1,13 @@
 """FastAPI application entry point."""
 import contextlib
 import logging
+from typing import Any, AsyncIterator, Dict
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import models.app_metadata  # noqa: F401  (registers tables with Base.metadata)
+import models.inbound_email  # noqa: F401
 import models.ingestion  # noqa: F401
 import models.processed_attachment  # noqa: F401
 import models.prompt  # noqa: F401
@@ -58,7 +60,15 @@ def _sync_audit_schema(sync_conn) -> None:
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Initializes database schema, seeds defaults, and validates Excel workbook state.
+
+    Args:
+        app: The FastAPI application instance.
+
+    Yields:
+        Control back to FastAPI for the duration of the application lifecycle.
+    """
     # create_all is fine for this demo; production would use Alembic migrations.
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -71,10 +81,16 @@ async def lifespan(app: FastAPI):
         # Creates / validates the workbook (rebuilding it from the DB if it is
         # missing or belongs to another database) and flushes pending rows.
         await sync_pending(db)
-    if not get_settings().supabase_jwt_secret and not get_settings().backoffice_api_key:
+    settings = get_settings()
+    if not settings.supabase_jwt_secret and not settings.supabase_url and not settings.backoffice_api_key:
         logger.warning(
-            "SUPABASE_JWT_SECRET and BACKOFFICE_API_KEY are not set. "
-            "Set SUPABASE_JWT_SECRET to enforce signed JWT authentication."
+            "SUPABASE_JWT_SECRET, SUPABASE_URL, and BACKOFFICE_API_KEY are all unset; "
+            "Backoffice API endpoints fail closed (HTTP 503) until auth is configured."
+        )
+    if not settings.inbound_email_token and not settings.backoffice_api_key:
+        logger.warning(
+            "INBOUND_EMAIL_TOKEN and BACKOFFICE_API_KEY are unset; "
+            "/api/email/inbound webhooks fail closed (HTTP 503) until configured."
         )
     logger.info("Extraction providers: %s", get_extractor().provider_names)
     yield
@@ -85,10 +101,9 @@ app = FastAPI(title="BillingStream AI Automation API", lifespan=lifespan)
 # Added before CORS so CORS stays the outer layer and a 413 still carries CORS headers.
 app.add_middleware(BodySizeLimitMiddleware, max_bytes=get_settings().max_request_mb * MB)
 
-# Local development only: the Vite dev server runs on another port.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=get_settings().cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -115,11 +130,20 @@ app.include_router(documents.router, prefix="/api/documents", tags=["Documents"]
 
 
 @app.get("/")
-async def root():
+async def root() -> Dict[str, str]:
+    """Returns a simple welcome banner for the BillingStream API root.
+
+    Returns:
+        JSON message confirming API availability.
+    """
     return {"message": "Welcome to BillingStream Backoffice API"}
 
 
 @app.get("/api/health")
-async def health():
-    """Liveness + which extraction engines are active (mock means no API key)."""
+async def health() -> Dict[str, Any]:
+    """Liveness + which extraction engines are active (mock means no API key).
+
+    Returns:
+        Service status and active extraction provider names.
+    """
     return {"status": "ok", "extraction_providers": get_extractor().provider_names}

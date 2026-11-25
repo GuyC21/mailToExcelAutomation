@@ -5,28 +5,25 @@ import { apiRequest } from '../api/client';
  * Hook: useSandboxJob
  *
  * Provides resilient in-flight job tracking for the Sandbox page.
- * On mount, queries the backend for any PROCESSING job belonging to the
- * current user.  If found, starts polling the job status every 1.5 seconds
- * until it completes (or fails), then exposes the finished result for the
- * Sandbox UI to render.
- *
- * This solves the "browser refresh loses spinner" problem: because the
- * PROCESSING record lives in the database, a refresh re-discovers it.
+ * On mount, queries the backend for any PROCESSING (or recently completed) job
+ * belonging to the current user. Polls multi-attachment emails until `all_completed`
+ * is true so partial attachments never cut off tracking early.
  *
  * @returns {{
- *   isTracking: boolean,            // True while a backend job is PROCESSING
- *   trackedResult: object|null,     // The completed job's extraction result
- *   trackedEmail: object|null,      // The email metadata if the job was email-based
- *   checkActiveJob: () => Promise,  // Re-check for active jobs (call after starting a new one)
+ *   isTracking: boolean,
+ *   trackedResults: object[],
+ *   trackedEmail: object|null,
+ *   trackedChannel: string|null,
+ *   checkActiveJob: () => Promise<void>,
  * }}
  */
 export function useSandboxJob() {
   const [isTracking, setIsTracking] = useState(false);
   const [trackedResults, setTrackedResults] = useState([]);
   const [trackedEmail, setTrackedEmail] = useState(null);
+  const [trackedChannel, setTrackedChannel] = useState(null);
   const intervalRef = useRef(null);
 
-  /** Clears any active polling interval. */
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -34,23 +31,13 @@ export function useSandboxJob() {
     }
   }, []);
 
-  /**
-   * Applies the fetched job outcome to hook state.
-   */
   const applyJobOutcome = useCallback((job) => {
-    const list = Array.isArray(job.all_results) && job.all_results.length > 0
-      ? job.all_results
-      : [job];
+    const list = Array.isArray(job.all_results) && job.all_results.length > 0 ? job.all_results : [job];
     setTrackedResults(list);
-    if (job.email) {
-      setTrackedEmail(job.email);
-    }
+    setTrackedChannel(job.channel || null);
+    setTrackedEmail(job.email || null);
   }, []);
 
-  /**
-   * Polls a specific document's status until it leaves PROCESSING.
-   * @param {number} documentId - The document_ingestion PK to poll.
-   */
   const startPolling = useCallback((documentId) => {
     stopPolling();
     setIsTracking(true);
@@ -58,7 +45,7 @@ export function useSandboxJob() {
     intervalRef.current = setInterval(async () => {
       try {
         const job = await apiRequest(`/api/sandbox/job-result/${documentId}`);
-        if (job.all_completed || job.status !== 'PROCESSING') {
+        if (job.all_completed) {
           stopPolling();
           applyJobOutcome(job);
           setIsTracking(false);
@@ -69,32 +56,48 @@ export function useSandboxJob() {
     }, 1500);
   }, [stopPolling, applyJobOutcome]);
 
-  /**
-   * Queries the backend for a PROCESSING (or recently completed) job owned by the current user.
-   * Called on mount and can be re-called after initiating a new upload/email.
-   */
   const checkActiveJob = useCallback(async () => {
     try {
       const response = await apiRequest('/api/sandbox/active-job');
       if (response.document_id) {
+        if (response.channel) {
+          setTrackedChannel(response.channel);
+        }
         if (response.active) {
           startPolling(response.document_id);
         } else {
-          // Job already finished: restore full results immediately
           const job = await apiRequest(`/api/sandbox/job-result/${response.document_id}`);
           applyJobOutcome(job);
         }
       }
     } catch {
-      // If the endpoint is unreachable, degrade gracefully — no spinner
+      // Degrade gracefully when unreachable
     }
   }, [startPolling, applyJobOutcome]);
 
-  // On mount: check for a surviving PROCESSING job from before the refresh
   useEffect(() => {
-    checkActiveJob();
-    return stopPolling;
-  }, [checkActiveJob, stopPolling]);
+    let active = true;
+    (async () => {
+      try {
+        const response = await apiRequest('/api/sandbox/active-job');
+        if (!active || !response.document_id) return;
+        if (response.channel) setTrackedChannel(response.channel);
+        if (response.active) {
+          startPolling(response.document_id);
+        } else {
+          const job = await apiRequest(`/api/sandbox/job-result/${response.document_id}`);
+          if (active) applyJobOutcome(job);
+        }
+      } catch {
+        // Degrade gracefully when unreachable
+      }
+    })();
 
-  return { isTracking, trackedResults, trackedEmail, checkActiveJob };
+    return () => {
+      active = false;
+      stopPolling();
+    };
+  }, [startPolling, applyJobOutcome, stopPolling]);
+
+  return { isTracking, trackedResults, trackedEmail, trackedChannel, checkActiveJob };
 }

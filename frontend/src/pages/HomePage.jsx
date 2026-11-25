@@ -1,27 +1,46 @@
 import { useState, useEffect, useRef } from 'react';
 import ConfirmModal from '../components/ConfirmModal';
 import ViewModal from '../components/ViewModal';
-import PromptCard from '../components/PromptCard';
 import HistoryModal from '../components/HistoryModal';
 import PromptForm from '../components/PromptForm';
+import PromptVersionList from '../components/PromptVersionList';
 import { usePrompts } from '../hooks/usePrompts';
 
+/**
+ * HomePage (Prompt Management) Component
+ *
+ * Orchestrates business prompt versioning, AI enhancement, technical envelope
+ * inspection, activation, and safe deletion via `usePrompts`.
+ * @component
+ * @returns {JSX.Element}
+ */
 const HomePage = () => {
-  const { prompts, loading, fetchPrompts, activatePrompt, deletePrompt, getTechnicalPrompt } = usePrompts();
+  const {
+    prompts,
+    loading,
+    error,
+    fetchPrompts,
+    createPrompt,
+    activatePrompt,
+    deletePrompt,
+    getTechnicalPrompt,
+    enhancePrompt,
+  } = usePrompts();
   const formRef = useRef(null);
 
-  // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [promptToDelete, setPromptToDelete] = useState(null);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [technicalPromptContent, setTechnicalPromptContent] = useState('');
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     fetchPrompts();
   }, [fetchPrompts]);
 
   const confirmDelete = (prompt) => {
+    setActionError('');
     setPromptToDelete(prompt);
     setIsModalOpen(true);
   };
@@ -29,20 +48,25 @@ const HomePage = () => {
   const handleDelete = async () => {
     if (!promptToDelete) return;
     const result = await deletePrompt(promptToDelete.id);
-    if (!result.success) {
-      alert(result.error);
-    }
+    if (!result.success) setActionError(result.error);
     setIsModalOpen(false);
     setPromptToDelete(null);
   };
 
+  const handleActivate = async (id) => {
+    setActionError('');
+    const result = await activatePrompt(id);
+    if (!result.success) setActionError(result.error);
+  };
+
   const fetchTechnicalPrompt = async (id) => {
+    setActionError('');
     const result = await getTechnicalPrompt(id);
     if (result.success) {
       setTechnicalPromptContent(result.content);
       setIsViewModalOpen(true);
     } else {
-      alert(result.error);
+      setActionError(result.error);
     }
   };
 
@@ -57,51 +81,32 @@ const HomePage = () => {
 
   return (
     <div className="w-full">
-      <header className="mb-6 md:mb-8 flex flex-col md:flex-row justify-between items-center bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
-        <h1 className="text-2xl md:text-3xl font-bold text-blue-900">BillingStream Backoffice - ניהול פרומפטים</h1>
+      <header className="mb-6 md:mb-8 bg-white p-4 md:p-6 rounded-lg shadow border border-gray-100">
+        <h1 className="text-2xl md:text-3xl font-bold text-blue-900">ניהול פרומפטים</h1>
+        <p className="text-gray-500 mt-1 text-sm md:text-base">
+          עריכה, שיפור וניהול גרסאות של הנחיות החילוץ העסקיות למנוע ה-AI
+        </p>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 lg:h-[680px]">
-        
-        {/* Create Form - Extracted to isolated component */}
-        <PromptForm ref={formRef} onSuccess={fetchPrompts} />
-
-        {/* Prompt History */}
-        <div className="flex flex-col h-full overflow-hidden">
-          <div className="flex justify-between items-center mb-4 bg-white p-4 rounded shadow border border-gray-100 border-b pb-2 shrink-0">
-            <h2 className="text-lg md:text-xl font-semibold text-gray-800">היסטוריית גרסאות</h2>
-            {prompts.length > 2 && (
-              <button 
-                onClick={() => setIsHistoryModalOpen(true)}
-                className="text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1 rounded transition font-medium"
-              >
-                הרחב רשימה (מסך מלא)
-              </button>
-            )}
-          </div>
-          
-          <div className="flex flex-col gap-4 overflow-y-auto pr-2 pb-2 flex-1">
-            {prompts.map(p => (
-              <PromptCard 
-                key={p.id}
-                prompt={p}
-                onDuplicate={handleDuplicate}
-                onActivate={activatePrompt}
-                onDelete={confirmDelete}
-                onViewTechnical={fetchTechnicalPrompt}
-              />
-            ))}
-            
-            {prompts.length === 0 && (
-              <div className="bg-white p-8 rounded-lg shadow border border-gray-100 text-center mt-4 shrink-0">
-                <p className="text-gray-500">אין פרומפטים שמורים במערכת.</p>
-              </div>
-            )}
-          </div>
+      {(error || actionError) && (
+        <div className="mb-6 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+          {actionError || error}
         </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 lg:h-[680px]">
+        <PromptForm ref={formRef} onCreate={createPrompt} onEnhance={enhancePrompt} />
+        <PromptVersionList
+          prompts={prompts}
+          onExpandHistory={() => setIsHistoryModalOpen(true)}
+          onDuplicate={handleDuplicate}
+          onActivate={handleActivate}
+          onDelete={confirmDelete}
+          onViewTechnical={fetchTechnicalPrompt}
+        />
       </div>
 
-      <ConfirmModal 
+      <ConfirmModal
         isOpen={isModalOpen}
         title="מחיקת פרומפט"
         message={`האם אתה בטוח שברצונך למחוק את הפרומפט "${promptToDelete?.name}"? פעולה זו אינה הפיכה.`}
@@ -118,12 +123,12 @@ const HomePage = () => {
         onClose={() => setIsViewModalOpen(false)}
       />
 
-      <HistoryModal 
+      <HistoryModal
         isOpen={isHistoryModalOpen}
         onClose={() => setIsHistoryModalOpen(false)}
         prompts={prompts}
         onDuplicate={handleDuplicate}
-        onActivate={activatePrompt}
+        onActivate={handleActivate}
         onDelete={confirmDelete}
         onViewTechnical={fetchTechnicalPrompt}
       />

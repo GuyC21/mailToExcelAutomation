@@ -5,6 +5,8 @@ from pydantic import BaseModel
 
 
 class ExcelWriteResult(BaseModel):
+    """Outcome of attempting to persist a document row to the Excel workbook."""
+
     written: bool
     message: Optional[str] = None
 
@@ -32,6 +34,8 @@ class IngestionResult(BaseModel):
 
 
 class EmailAttachmentInfo(BaseModel):
+    """Sanitized metadata for one attachment on an inbound email."""
+
     filename: str
     content_type: str
     size_bytes: int
@@ -53,5 +57,7 @@ class EmailInfo(BaseModel):
 
 
 class EmailIngestionResponse(BaseModel):
+    """Combined API response for inbound email ingestion (email metadata + results)."""
+
     email: EmailInfo
     results: List[IngestionResult]

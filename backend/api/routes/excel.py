@@ -3,16 +3,17 @@
 Provides endpoints to preview the final Excel structure and to download the
 master workbook. The Excel file acts as the primary data hand-off to the finance team.
 """
+import asyncio
 import os
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from schemas.excel import SyncResult
 from services.excel_sync import get_excel_repository, sync_pending
 
 router = APIRouter()
@@ -32,7 +33,7 @@ async def preview_workbook(limit: int = Query(10, ge=1, le=100)) -> Dict[str, An
     Returns:
         Dict[str, Any]: Dictionary containing status counts and a list of the latest rows.
     """
-    return get_excel_repository().preview(limit)
+    return await asyncio.to_thread(get_excel_repository().preview, limit)
 
 
 @router.get("/download")
@@ -49,18 +50,10 @@ async def download_workbook() -> FileResponse:
         HTTPException: If the Excel file does not exist yet (404).
     """
     path = get_excel_repository().file_path
-    if not os.path.exists(path):
+    if not await asyncio.to_thread(os.path.exists, path):
         raise HTTPException(status_code=404, detail="קובץ האקסל טרם נוצר")
     filename = f"BillingStream_Master_{datetime.now():%Y-%m-%d_%H%M}.xlsx"
     return FileResponse(path, media_type=_XLSX_MIME, filename=filename)
-
-
-class SyncResult(BaseModel):
-    """Outcome of a manual Excel sync (mirrors ``services.excel_sync.sync_pending``)."""
-
-    synced: List[int]
-    pending: int
-    error: Optional[str] = None
 
 
 @router.post("/sync", response_model=SyncResult)

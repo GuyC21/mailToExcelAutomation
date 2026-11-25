@@ -137,6 +137,7 @@ class TestCaseResult:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
+        """Serializes the single test case outcome for API responses and DB storage."""
         return {
             "name": self.name,
             "document_path": self.document_path,
@@ -163,14 +164,17 @@ class RegressionReport:
 
     @property
     def total(self) -> int:
+        """Total number of cases included in this regression run."""
         return len(self.results)
 
     @property
     def passed(self) -> int:
+        """Number of cases that passed both score threshold and critical checks."""
         return sum(1 for r in self.results if r.passed)
 
     @property
     def failed(self) -> int:
+        """Number of cases that failed score threshold, critical checks, or extraction."""
         return self.total - self.passed
 
     @property
@@ -211,6 +215,7 @@ class RegressionReport:
         return seen
 
     def to_dict(self) -> dict:
+        """Serializes the full regression report including summary metrics and results."""
         return {
             "suite_dir": self.suite_dir,
             "generated_at": self.generated_at,
@@ -300,10 +305,16 @@ class RegressionRunner:
             providers.append(GeminiProvider(gemini_k, settings.gemini_model_chain))
         elif openai_k:
             providers.append(OpenAIProvider(openai_k, settings.openai_model))
+        else:
+            # Allow test stubs monkeypatching GeminiProvider.is_configured without
+            # ever falling back to settings.gemini_api_key.
+            stub_candidate = GeminiProvider("", settings.gemini_model_chain)
+            if stub_candidate.is_configured():
+                providers.append(stub_candidate)
 
         if not providers:
             raise RegressionProviderUnavailableError(
-                "הרצת בדיקות רגרסיה דורשת ספק AI אמיתי. יש להזין מפתח אישי (Google Gemini או OpenAI) דרך תפריט ה-BYOK בראש המסך."
+                "הרצת בדיקות רגרסיה דורשת ספק AI אמיתי (GEMINI_API_KEY או OPENAI_API_KEY) — יש להזין מפתח אישי דרך תפריט ה-BYOK בראש המסך."
             )
 
         return cls(DocumentExtractor(providers), **kwargs)
@@ -312,7 +323,7 @@ class RegressionRunner:
         """Runs every case in ``suite_dir`` (default: ``default_suite_dir()``) and
         returns the aggregate report."""
         suite_dir = suite_dir if suite_dir is not None else default_suite_dir()
-        cases, warnings = discover_cases(suite_dir)
+        cases, warnings = await asyncio.to_thread(discover_cases, suite_dir)
         report = RegressionReport(
             suite_dir=str(suite_dir),
             generated_at=datetime.now(timezone.utc).isoformat(),
@@ -326,7 +337,8 @@ class RegressionRunner:
 
     async def _run_case(self, case: SuiteCase) -> TestCaseResult:
         try:
-            expected = json.loads(case.expected_path.read_text(encoding="utf-8"))
+            raw_expected = await asyncio.to_thread(case.expected_path.read_text, encoding="utf-8")
+            expected = json.loads(raw_expected)
         except (OSError, json.JSONDecodeError) as error:
             return TestCaseResult(case.name, str(case.document_path), str(case.expected_path),
                                   passed=False, error=f"קובץ ה-ground-truth אינו קריא: {error}")

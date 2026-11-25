@@ -7,10 +7,10 @@ import FieldRow from './FieldRow';
 const baseName = (path) => (path || '').split(/[\\/]/).pop();
 
 /**
- * One regression case: pass/fail, score, and the field-by-field breakdown.
- * `testCase` is one entry of the API's `results` array; `score` is null when
- * the extraction itself failed (then `error` explains why).
- * @param {{testCase: object}} props
+ * One regression case: pass/fail status, aggregate score, and expandable field breakdown.
+ * @component
+ * @param {{ testCase: object }} props - Single TestCaseResult from the regression API.
+ * @returns {JSX.Element}
  */
 export default function CaseCard({ testCase }) {
   const [expanded, setExpanded] = useState(false);
@@ -19,35 +19,46 @@ export default function CaseCard({ testCase }) {
   const fieldResults = scoreData?.field_results || [];
   const lineComparisons = scoreData?.line_item_comparisons || [];
 
+  const toggleExpanded = () => setExpanded((prev) => !prev);
+
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-      <div 
-        className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50 transition"
-        onClick={() => setExpanded(!expanded)}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onClick={toggleExpanded}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            toggleExpanded();
+          }
+        }}
+        className="p-4 flex flex-wrap items-center justify-between gap-3 cursor-pointer hover:bg-gray-50 transition focus:outline-none focus:bg-gray-50"
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           {testCase.passed ? (
-            <CheckCircle className="w-6 h-6 text-green-500" />
+            <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
           ) : (
-            <AlertTriangle className="w-6 h-6 text-red-500" />
+            <AlertTriangle className="w-6 h-6 text-red-500 flex-shrink-0" />
           )}
-          <div>
-            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-gray-400" />
-              {testCase.name}
+          <div className="min-w-0">
+            <h3 className="font-semibold text-gray-800 flex items-center gap-2 truncate">
+              <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
+              <span className="truncate">{testCase.name}</span>
             </h3>
-            <p className="text-xs text-gray-500">
+            <p className="text-xs text-gray-500 truncate">
               Document: {baseName(testCase.document_path)}
               {testCase.provider && ` · ${testCase.provider}${testCase.model ? `/${testCase.model}` : ''}`}
             </p>
             {criticalFailures.length > 0 && (
-              <p className="text-xs text-red-600 font-medium mt-0.5">
+              <p className="text-xs text-red-600 font-medium mt-0.5 break-words">
                 שדות קריטיים שגויים: {criticalFailures.join(', ')}
               </p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
           <div className="text-right">
             <p className="text-xs text-gray-500 uppercase font-semibold">Score</p>
             <ScoreGauge score={scoreData ? scoreData.overall_score : null} />
@@ -66,14 +77,14 @@ export default function CaseCard({ testCase }) {
         <div className="p-4 bg-gray-50 border-t border-gray-200">
           <h4 className="text-sm font-bold text-gray-700 mb-2">שדות כלליים (Header)</h4>
           <div className="bg-white rounded border border-gray-200 overflow-x-auto mb-6">
-            <table className="w-full text-left">
+            <table className="w-full text-right min-w-[520px]">
               <thead className="bg-gray-100 text-gray-600 text-xs uppercase">
                 <tr>
                   <th className="py-2 px-3 font-semibold">שדה</th>
                   <th className="py-2 px-3 font-semibold">מצופה (Expected)</th>
                   <th className="py-2 px-3 font-semibold">בפועל (Actual)</th>
                   <th className="py-2 px-3 font-semibold text-center">התאמה</th>
-                  <th className="py-2 px-3 font-semibold text-right">ציון</th>
+                  <th className="py-2 px-3 font-semibold text-left">ציון</th>
                 </tr>
               </thead>
               <tbody>
@@ -94,7 +105,7 @@ export default function CaseCard({ testCase }) {
                       <span>שורה {idx + 1} - סטטוס: {line.status}</span>
                       <span>ציון: {(line.score * 100).toFixed(0)}%</span>
                     </div>
-                    <table className="w-full text-left min-w-[500px]">
+                    <table className="w-full text-right min-w-[500px]">
                       <tbody>
                         {line.fields && line.fields.map((comp, fIdx) => (
                           <FieldRow key={fIdx} field={comp} />

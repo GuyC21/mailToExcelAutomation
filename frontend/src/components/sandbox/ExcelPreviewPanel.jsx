@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { formatDate } from '../../utils/format';
 
 const COLUMNS = ['מזהה קליטה', 'תאריך קליטה', 'סטטוס', 'ערוץ', 'ספק', 'מספר מסמך', 'תאריך מסמך', 'סה"כ לתשלום'];
@@ -17,11 +18,29 @@ const display = (header, value) => {
 
 /**
  * Latest rows of the master workbook, so testers see Excel update live.
- * @param {{preview: object|null, isLoading: boolean, error?: string, downloadUrl: string,
- *   highlightIds: number[], onRefresh: () => void}} props
+ * @component
+ * @param {{
+ *   preview: object|null,
+ *   isLoading: boolean,
+ *   error?: string|null,
+ *   onDownload: () => Promise<void>,
+ *   highlightIds: number[],
+ *   onRefresh: () => void,
+ * }} props
+ * @returns {JSX.Element}
  */
-const ExcelPreviewPanel = ({ preview, isLoading, error, downloadUrl, highlightIds, onRefresh }) => {
+const ExcelPreviewPanel = ({ preview, isLoading, error, onDownload, highlightIds, onRefresh }) => {
+  const [downloadError, setDownloadError] = useState(null);
   const indexes = preview ? COLUMNS.map((c) => preview.headers.indexOf(c)) : [];
+
+  const handleDownload = async () => {
+    setDownloadError(null);
+    try {
+      await onDownload?.();
+    } catch (err) {
+      setDownloadError(err.message || 'שגיאה בהורדת הקובץ');
+    }
+  };
 
   return (
     <section className="bg-white rounded-lg shadow border border-gray-100 overflow-hidden">
@@ -36,11 +55,15 @@ const ExcelPreviewPanel = ({ preview, isLoading, error, downloadUrl, highlightId
           {preview && COUNT_CHIPS.map((c) => (
             <span key={c.code} className={`text-xs font-medium px-2 py-1 rounded ${c.className}`}>{c.label}: {preview.counts[c.code] ?? 0}</span>
           ))}
-          <button type="button" onClick={onRefresh} disabled={isLoading} className="text-sm px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50">רענן</button>
-          <a href={downloadUrl} className="text-sm px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800">⬇ הורד Excel</a>
+          <button type="button" onClick={onRefresh} disabled={isLoading} className="text-sm px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50">
+            רענן
+          </button>
+          <button type="button" onClick={handleDownload} className="text-sm px-3 py-1.5 rounded bg-green-700 text-white hover:bg-green-800">
+            ⬇ הורד Excel
+          </button>
         </div>
       </div>
-      {error && <p className="p-4 text-sm text-red-700">{error}</p>}
+      {(error || downloadError) && <p className="p-4 text-sm text-red-700">{downloadError || error}</p>}
       {preview && preview.rows.length === 0 && <p className="p-6 text-center text-sm text-gray-500">הקובץ עדיין ריק – שלח מייל או העלה טופס.</p>}
       {preview && preview.rows.length > 0 && (
         <div className="overflow-x-auto">

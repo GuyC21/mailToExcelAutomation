@@ -7,6 +7,10 @@ RUN npm install
 
 COPY . .
 
+RUN mkdir -p /app/node_modules/.vite-temp /app/node_modules/.vite && \
+    chown -R node:node /app
+USER node
+
 # Vite default port
 EXPOSE 5173
 

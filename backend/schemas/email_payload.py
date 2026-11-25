@@ -19,6 +19,7 @@ class EmailAttachment(BaseModel):
 
     @property
     def size(self) -> int:
+        """Returns the declared or measured byte size of the attachment."""
         return self.original_size if self.original_size is not None else len(self.content)
 
 
@@ -58,6 +59,6 @@ class JsonEmailRequest(BaseModel):
     message_id: Optional[str] = Field(None, max_length=500)
     date: Optional[str] = Field(None, max_length=100)
     headers: Dict[str, str] = Field(default_factory=dict)
-    attachments: List[JsonAttachment] = Field(default_factory=list, max_length=20)
+    attachments: List[JsonAttachment] = Field(default_factory=list)
 
     model_config = {"populate_by_name": True}

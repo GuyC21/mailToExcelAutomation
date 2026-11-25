@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies.auth import require_approved_user
 from api.dependencies.byok import BYOKCredentials, get_byok_credentials
+from api.rate_limit import RateLimiter
 from api.uploads import MB, read_upload_or_413
 from config import get_settings
 from database import get_db
@@ -19,9 +20,10 @@ from services.file_storage import UnsupportedDocumentError
 from services.ingestion_pipeline import NoActivePromptError, ingest_document
 
 router = APIRouter()
+_upload_rate_limit = RateLimiter(max_requests=30, window_seconds=60)
 
 
-@router.post("/upload", response_model=IngestionResult)
+@router.post("/upload", response_model=IngestionResult, dependencies=[Depends(_upload_rate_limit)])
 async def ingest_sample(
     file: UploadFile = File(...),
     byok: BYOKCredentials = Depends(get_byok_credentials),

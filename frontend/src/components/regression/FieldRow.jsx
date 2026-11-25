@@ -1,6 +1,14 @@
 import React from 'react';
 import { CheckCircle, XCircle } from 'lucide-react';
 
+/**
+ * FieldRow Component
+ *
+ * Renders one compared header or line-item field inside a regression case breakdown table.
+ * @component
+ * @param {{ field: { field: string, expected: any, actual: any, matched: boolean, score: number } }} props
+ * @returns {JSX.Element}
+ */
 export default function FieldRow({ field }) {
   return (
     <tr className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
@@ -14,7 +22,7 @@ export default function FieldRow({ field }) {
           <XCircle className="inline w-5 h-5 text-red-500" />
         )}
       </td>
-      <td className="py-2 px-3 text-xs text-gray-400 text-right">{(field.score * 100).toFixed(0)}%</td>
+      <td className="py-2 px-3 text-xs text-gray-400 text-left">{(field.score * 100).toFixed(0)}%</td>
     </tr>
   );
 }

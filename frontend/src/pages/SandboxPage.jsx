@@ -15,47 +15,31 @@ import { useSandboxJob } from '../hooks/useSandboxJob';
 /**
  * SandboxPage Component
  *
- * Orchestrates the end-to-end sandbox testing environment for data extraction.
- * This component intentionally holds no direct business logic or API calls;
- * instead, it acts as a coordinator between the UI modes (Email vs Direct Upload)
- * and delegates all I/O operations to custom hooks.
- *
- * The `useSandboxJob` hook provides **resilient in-flight tracking**: if the user
- * refreshes the browser while extraction is running, the hook re-discovers the
- * PROCESSING job from the backend and keeps the spinner visible until it completes.
- *
+ * Orchestrates the end-to-end sandbox testing environment for data extraction,
+ * coordinating Email vs Direct Upload flows and resilient refresh recovery.
  * @component
  * @returns {JSX.Element} The rendered Sandbox page.
  */
 const SandboxPage = () => {
-  const [mode, setMode] = useState('email');
+  const [modeOverride, setModeOverride] = useState(null);
   const upload = useIngestion();
   const inbound = useEmailInbound();
   const excel = useExcelPreview();
   const sandboxJob = useSandboxJob();
 
-  // A job is "running" if either hook is actively sending OR the backend
-  // reports a surviving PROCESSING record from before this page load.
+  const mode = modeOverride ?? (sandboxJob.trackedChannel === 'sandbox' ? 'file' : 'email');
   const isRunning = upload.isUploading || inbound.isSending || sandboxJob.isTracking;
 
-  // Merge results: prefer hook-level results when available, fall back to
-  // the tracked results recovered after a browser refresh.
   const hookResults = mode === 'email' ? inbound.response?.results || [] : upload.result ? [upload.result] : [];
-  const results = hookResults.length > 0
-    ? hookResults
-    : sandboxJob.trackedResults.length > 0
-      ? sandboxJob.trackedResults
-      : [];
+  const trackedMatchesMode =
+    (mode === 'email' && sandboxJob.trackedChannel === 'email') ||
+    (mode === 'file' && sandboxJob.trackedChannel === 'sandbox');
+  const results = hookResults.length > 0 ? hookResults : trackedMatchesMode ? sandboxJob.trackedResults : [];
 
-  const emailPayload = inbound.response?.email || sandboxJob.trackedEmail;
+  const emailPayload = inbound.response?.email || (trackedMatchesMode ? sandboxJob.trackedEmail : null);
   const error = mode === 'email' ? inbound.error : upload.error;
   const highlightIds = results.map((r) => r.ingestion_id ?? r.document_id).filter(Boolean);
 
-  /**
-   * Wraps an upload/email promise: after it resolves, refreshes the Excel
-   * preview and kicks off a background check for the newly created PROCESSING
-   * record (in case the response arrives before the commit).
-   */
   const afterRun = async (promise) => {
     await promise;
     excel.refresh();
@@ -77,7 +61,7 @@ const SandboxPage = () => {
         </div>
       </header>
 
-      <ModeTabs mode={mode} onChange={setMode} disabled={isRunning} />
+      <ModeTabs mode={mode} onChange={setModeOverride} disabled={isRunning} />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 items-start gap-[1rem] sm:gap-[1.5rem] mb-[1.5rem] w-full max-w-full">
         <div className="lg:col-span-5">
@@ -97,9 +81,7 @@ const SandboxPage = () => {
             <ResultsPlaceholder isRunning={isRunning} error={error} mode={mode} />
           ) : (
             <>
-              {mode === 'email' && emailPayload && (
-                <EmailPayloadCard email={emailPayload} results={results} />
-              )}
+              {mode === 'email' && emailPayload && <EmailPayloadCard email={emailPayload} results={results} />}
               {results.map((result, idx) => (
                 <ExtractionResultCard key={result.ingestion_id ?? result.document_id ?? `${result.filename}-${idx}`} result={result} />
               ))}
@@ -112,7 +94,7 @@ const SandboxPage = () => {
         preview={excel.preview}
         isLoading={excel.isLoading}
         error={excel.error}
-        downloadUrl={excel.downloadUrl}
+        onDownload={excel.downloadExcel}
         highlightIds={highlightIds}
         onRefresh={excel.refresh}
       />

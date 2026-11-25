@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiRequest, apiUrl } from '../api/client';
+import { apiRequest, downloadAuthenticatedFile } from '../api/client';
 
 /**
  * Hook: useExcelPreview
- * 
- * Fetches and manages a live preview of the target Excel file where extraction 
- * results are appended. This allows the sandbox to verify that the end-to-end 
- * process actually wrote the expected data to the "database" (Excel).
- * 
- * @param {number} [limit=8] - Maximum number of recent rows to retrieve from the Excel file
+ *
+ * Fetches and manages a live preview of the target master Excel file and exposes
+ * an authenticated download action that avoids putting JWTs in query strings.
+ *
+ * @param {number} [limit=8] - Maximum number of recent rows to retrieve.
  * @returns {{
- *   preview: object|null,  // The parsed Excel data including rows and statistics
- *   isLoading: boolean,    // True on initial load or during refresh
- *   error: string|null,    // Error message if the preview fetch fails
- *   refresh: () => Promise<void>, // Function to manually trigger a re-fetch of the Excel data
- *   downloadUrl: string    // Direct URL for the user to download the actual Excel file
+ *   preview: object|null,
+ *   isLoading: boolean,
+ *   error: string|null,
+ *   refresh: () => Promise<void>,
+ *   downloadExcel: () => Promise<void>,
  * }}
  */
 export function useExcelPreview(limit = 8) {
@@ -22,25 +21,47 @@ export function useExcelPreview(limit = 8) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const load = useCallback(async () => {
+  const fetchPreview = useCallback((signal) => apiRequest(`/api/excel/preview?limit=${limit}`, { signal }), [limit]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const data = await fetchPreview(controller.signal);
+        if (!controller.signal.aborted) {
+          setPreview(data);
+          setError(null);
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError' && !controller.signal.aborted) {
+          setError(err.message);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    return () => controller.abort();
+  }, [fetchPreview]);
+
+  const refresh = useCallback(async () => {
+    setIsLoading(true);
     try {
-      setPreview(await apiRequest(`/api/excel/preview?limit=${limit}`));
+      setPreview(await fetchPreview());
       setError(null);
     } catch (err) {
       setError(err.message);
     } finally {
       setIsLoading(false);
     }
-  }, [limit]);
+  }, [fetchPreview]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  const downloadExcel = useCallback(
+    () => downloadAuthenticatedFile('/api/excel/download', 'BillingStream_Master.xlsx'),
+    [],
+  );
 
-  const refresh = useCallback(() => {
-    setIsLoading(true);
-    return load();
-  }, [load]);
-
-  return { preview, isLoading, error, refresh, downloadUrl: apiUrl('/api/excel/download') };
+  return { preview, isLoading, error, refresh, downloadExcel };
 }

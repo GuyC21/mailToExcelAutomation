@@ -1,8 +1,13 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+"""SQLAlchemy model for versioned extraction business prompts."""
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
+
 from database import Base
 
+
 class PromptVersion(Base):
+    """One versioned business instruction prompt managed in the Backoffice."""
+
     __tablename__ = "prompt_versions"
 
     id = Column(Integer, primary_key=True, index=True)
